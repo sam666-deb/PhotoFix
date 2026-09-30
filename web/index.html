@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PhotoFix</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>PhotoFix</h1>
+    <p class="tagline">Drop a photo. It finds the defects and fixes them automatically.</p>
+  </header>
+
+  <main>
+    <label id="drop" class="drop">
+      <input id="file" type="file" accept="image/*" hidden>
+      <span id="drop-text">Drop a photo here, or click to choose</span>
+    </label>
+
+    <section id="result" hidden>
+      <div class="viewer">
+        <div id="compare" class="compare">
+          <canvas id="before"></canvas>
+          <canvas id="after"></canvas>
+          <div id="divider" class="divider"></div>
+          <span class="tag tag-left">Before</span>
+          <span class="tag tag-right">After</span>
+          <input id="split" class="split" type="range" min="0" max="100" value="50" aria-label="Before/after split">
+        </div>
+        <div class="controls">
+          <label>Strength <input id="strength" type="range" min="0" max="100" value="100"> <output id="strength-val">100%</output></label>
+          <button id="download" type="button">Download</button>
+          <button id="reset" type="button" class="secondary">New photo</button>
+        </div>
+      </div>
+
+      <aside class="report">
+        <h2>Detected defects</h2>
+        <ul id="scores" class="scores"></ul>
+        <h2>Applied edits</h2>
+        <ol id="steps" class="steps"></ol>
+        <p id="meta" class="meta"></p>
+      </aside>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
