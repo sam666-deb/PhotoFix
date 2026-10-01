@@ -115,3 +115,55 @@ def random_degrade(
     if rng.random() < 0.3:
         out = jpeg(out, int(rng.integers(60, 95)))
     return np.clip(out, 0.0, 1.0).astype(np.float32), {k: round(float(v), 3) for k, v in labels.items()}
+
+
+def restoration_degrade(
+    patch: np.ndarray, rng: np.random.Generator, margin: int, p_clean: float = 0.15
+) -> tuple[np.ndarray, dict[str, float]]:
+    """Realistic noise/blur/compression for training the restorer (Phase 3).
+
+    `patch` includes `margin` extra pixels per side so blur kernels see real context; the returned
+    image is cropped back. Compared with `random_degrade`, the noise here mimics what reaches a phone
+    or camera JPEG: signal-dependent, often luminance-dominant, sometimes spatially correlated
+    (demosaicing / in-camera denoising smear it into blotches), then JPEG-compressed.
+    """
+    out = patch.astype(np.float32, copy=True)
+    labels = {"noise": 0.0, "blur": 0.0, "jpeg": 0.0}
+    if rng.random() >= p_clean:
+        kinds = [k for k, p in (("blur", 0.55), ("noise", 0.65), ("jpeg", 0.5)) if rng.random() < p]
+        if not kinds:
+            kinds = [rng.choice(["blur", "noise"])]
+        if "blur" in kinds:
+            kind = rng.choice(["gaussian", "defocus", "motion"])
+            if kind == "gaussian":
+                sigma = rng.uniform(0.6, 2.5)
+                out = cv2.GaussianBlur(out, (0, 0), sigma)
+                labels["blur"] = sigma / 2.5
+            elif kind == "defocus":
+                radius = rng.uniform(1.0, 4.0)
+                out = defocus_blur(out, radius)
+                labels["blur"] = radius / 4.0
+            else:
+                length = int(rng.integers(3, 14))
+                out = motion_blur(out, length, rng.uniform(0, 180))
+                labels["blur"] = length / 13
+        if "noise" in kinds:
+            sigma = rng.uniform(0.01, 0.08)  # std at mid-gray
+            shape = out.shape
+            per_channel = rng.standard_normal(shape, dtype=np.float32)
+            luma = rng.standard_normal(shape[:2], dtype=np.float32)[..., None]
+            mix = rng.uniform(0.0, 0.8)  # how luminance-dominant the noise is
+            field = np.sqrt(1 - mix**2) * per_channel + mix * luma
+            if rng.random() < 0.4:  # spatially correlated (blotchy) noise
+                field = cv2.GaussianBlur(field, (0, 0), rng.uniform(0.5, 1.2))
+                field /= field.std() + 1e-6
+            std = sigma * np.sqrt(0.3 + 1.4 * np.clip(out, 0, 1))  # shot noise grows with brightness
+            out = np.clip(out + field * std, 0.0, 1.0)
+            labels["noise"] = sigma / 0.08
+        if "jpeg" in kinds:
+            q = int(rng.integers(40, 96))
+            out = jpeg(out, q)
+            labels["jpeg"] = (95 - q) / 55
+    if margin:
+        out = out[margin:-margin, margin:-margin]
+    return np.clip(out, 0.0, 1.0).astype(np.float32), {k: round(float(v), 3) for k, v in labels.items()}

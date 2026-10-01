@@ -54,10 +54,16 @@ function showReport(data) {
       })
   );
   const steps = data.steps.length ? data.steps : ["No edits needed. This photo already looks good."];
-  $("steps").replaceChildren(...steps.map((s) => Object.assign(document.createElement("li"), { textContent: s })));
+  const guardNote = data.guardrail?.note;
+  $("steps").replaceChildren(...steps.map((s) => Object.assign(document.createElement("li"), {
+    textContent: s,
+    className: s === guardNote ? "guard" : "",
+    title: s === guardNote ? "Safety check: the edit was blended back toward the original to stay natural." : "",
+  })));
   const analyzer = data.analysis.source === "dl" ? "neural analyzer" : "classical analyzer";
   $("meta").textContent = `${data.width}×${data.height} · ${analyzer} · ${STYLE_LABELS[data.style]} · ` +
     `processed in ${(data.elapsed_ms / 1000).toFixed(2)} s`;
+  $("meta").title = Object.entries(data.timings_ms ?? {}).map(([stage, ms]) => `${stage}: ${ms} ms`).join("\n");
 }
 
 const fromDataUrl = async (url) => createImageBitmap(await (await fetch(url)).blob());

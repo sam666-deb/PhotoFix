@@ -1,6 +1,10 @@
 """FastAPI app: serves the web UI and the enhancement API.
 
 Run:  .venv/bin/uvicorn server.main:app --reload   ->  http://127.0.0.1:8000
+
+Components load from checkpoints/ (or PHOTOFIX_CHECKPOINTS) when present. Switches for comparing
+against baselines: PHOTOFIX_ANALYZER=classical, PHOTOFIX_LUT=off, PHOTOFIX_RESTORER=off,
+PHOTOFIX_GUARDRAIL=off.
 """
 
 import base64
@@ -12,36 +16,20 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.staticfiles import StaticFiles
 from PIL import UnidentifiedImageError
 
-from photofix import enhance
 from photofix.imageio import BROWSER_FORMATS, encode_jpeg, image_format, load_image
+from photofix.pipeline import CHECKPOINTS, Pipeline
 
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
-ROOT = Path(__file__).resolve().parent.parent
-WEB_DIR = ROOT / "web"
-CHECKPOINT = Path(os.environ.get("PHOTOFIX_CHECKPOINT", ROOT / "checkpoints" / "analyzer.pt"))
-LUT_CHECKPOINT = Path(os.environ.get("PHOTOFIX_LUT_CHECKPOINT", ROOT / "checkpoints" / "lut.pt"))
+WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
-
-def _load_net():
-    """Use the trained analyzer when a checkpoint exists; PHOTOFIX_ANALYZER=classical forces the baseline."""
-    if os.environ.get("PHOTOFIX_ANALYZER") == "classical" or not CHECKPOINT.exists():
-        return None
-    from photofix.net import DLAnalyzer
-
-    return DLAnalyzer(CHECKPOINT)
-
-
-def _load_lut():
-    """The learned expert LUT behind the "pro" style; PHOTOFIX_LUT=off disables it."""
-    if os.environ.get("PHOTOFIX_LUT") == "off" or not LUT_CHECKPOINT.exists():
-        return None
-    from photofix.lut import LUTEnhancer
-
-    return LUTEnhancer(LUT_CHECKPOINT)
-
-
-net = _load_net()
-lut = _load_lut()
+pipeline = Pipeline.load(
+    Path(os.environ.get("PHOTOFIX_CHECKPOINTS", CHECKPOINTS)),
+    analyzer=os.environ.get("PHOTOFIX_ANALYZER") != "classical",
+    lut=os.environ.get("PHOTOFIX_LUT") != "off",
+    restorer=os.environ.get("PHOTOFIX_RESTORER") != "off",
+    guardrail=os.environ.get("PHOTOFIX_GUARDRAIL") != "off",
+)
+STYLES = pipeline.styles
 app = FastAPI(title="PhotoFix")
 
 
@@ -60,14 +48,9 @@ def _data_url(jpeg: bytes) -> str:
     return "data:image/jpeg;base64," + base64.b64encode(jpeg).decode()
 
 
-# natural: rule-based corrections + finishing (vivid, suits already-processed phone photos)
-# pro:     global color/tone learned from a professional retoucher (MIT-Adobe FiveK, Expert C)
-STYLES = ("natural", "pro") if lut else ("natural",)
-
-
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "analyzer": net.name if net else "classical", "styles": list(STYLES)}
+    return {"status": "ok", **pipeline.describe()}
 
 
 # Sync handlers run in FastAPI's threadpool, so heavy image work doesn't block the event loop.
@@ -77,17 +60,13 @@ def enhance_image(file: UploadFile = File(...), style: str = Form("natural")):
         raise HTTPException(400, f"Unknown or unavailable style {style!r}; available: {', '.join(STYLES)}.")
     rgb, icc, browser_can_decode = _read_upload(file)
     start = time.perf_counter()
-    out, analysis, params = enhance(rgb, net=net, lut=lut if style == "pro" else None)
-    elapsed_ms = round((time.perf_counter() - start) * 1000)
+    result = pipeline.run(rgb, style)
     response = {
-        "analysis": analysis.to_dict(),
-        "params": params.to_dict(),
-        "steps": params.describe(),
+        **result.to_dict(),
         "width": rgb.shape[1],
         "height": rgb.shape[0],
-        "elapsed_ms": elapsed_ms,
-        "style": style,
-        "image": _data_url(encode_jpeg(out, icc=icc)),
+        "elapsed_ms": round((time.perf_counter() - start) * 1000),
+        "image": _data_url(encode_jpeg(result.image, icc=icc)),
     }
     if not browser_can_decode:  # e.g. HEIC in Chrome: send the original too, for the before view
         response["original"] = _data_url(encode_jpeg(rgb, icc=icc))

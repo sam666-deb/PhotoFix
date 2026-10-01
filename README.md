@@ -20,8 +20,10 @@ python3 -m venv .venv
 .venv/bin/python -m scripts.gallery --images DIR    # before/after sheets for real photos -> results/gallery/
 ```
 
-The server uses the neural analyzer automatically when `checkpoints/analyzer.pt` exists
-(`PHOTOFIX_ANALYZER=classical` forces the baseline). The checkpoint isn't in git, so train it:
+The server loads every trained model it finds in `checkpoints/`. To compare against baselines, set
+`PHOTOFIX_ANALYZER=classical`, `PHOTOFIX_LUT=off`, `PHOTOFIX_RESTORER=off` or `PHOTOFIX_GUARDRAIL=off`.
+
+Checkpoints are not in git. Train the analyzer like this:
 
 ```bash
 mkdir -p data/raw   # DIV2K, ~4 GB
@@ -49,6 +51,11 @@ photo ─► [A] Analyzer ─► defect scores ─► [B] plan_edits ─► Edit
 | `photofix/metrics.py` | PSNR, SSIM, ΔE |
 | `scripts/evaluate.py` | Scorecard: restoration quality, "do no harm", per-defect precision/recall |
 | `scripts/train_analyzer.py` | Trains the DL analyzer, saves the best checkpoint by validation loss |
+| `photofix/pipeline.py` | Phase 4: loads available models, runs analyze → restore → style → edits → guardrail, with per-stage timings |
+| `photofix/guardrail.py` | Phase 4: checks the *result* (highlights, shadows, skin tones in detected faces, saturation, noise/halos) and blends back if needed |
+| `models/` | Bundled YuNet face detector (MIT) used by the guardrail's skin check |
+| `photofix/restore.py` | Phase 3: NAFNet restorer (blind denoise/deblur/JPEG cleanup), tiled + feather-blended at full res |
+| `scripts/train_restorer.py`, `eval_restore.py` | Restorer training on DIV2K patches; head-to-head vs classical, per damage type |
 | `photofix/lut.py` | Phase 2: Image-Adaptive 3D LUT (CNN predicts a per-photo LUT from a thumbnail, applied at full res) |
 | `scripts/prepare_fivek.py`, `train_lut.py`, `eval_fivek.py` | FiveK data prep (streamed, aligned, 480p), LUT training, expert-referenced scorecard |
 | `scripts/gallery.py` | Runs a folder of real photos (JPEG/PNG/HEIC) through the pipeline, writes before/after sheets + report |
@@ -76,6 +83,13 @@ Neither style wins everywhere (see the Phase 2 scorecard), so the user chooses. 
 .venv/bin/python -m scripts.eval_fivek      # score all variants against the expert
 ```
 
+The neural restorer (both styles) needs `checkpoints/restorer.pt`:
+
+```bash
+.venv/bin/python -m scripts.train_restorer  # ~70 min on an M1 Pro, uses the DIV2K photos from Phase 1
+.venv/bin/python -m scripts.eval_restore    # neural vs classical, per damage type
+```
+
 ## Roadmap
 
 | Phase | Goal | Status |
@@ -83,9 +97,9 @@ Neither style wins everywhere (see the Phase 2 scorecard), so the user chooses. 
 | 0 | Classical baseline, degradation engine, eval harness, web app | ✅ done |
 | 1 | DL analyzer (dual-view CNN on synthetic defects) replaces `analyze` | ✅ done |
 | 2 | Learned "Pro" style: Image-Adaptive 3D LUT trained on MIT-Adobe FiveK (Expert C) | ✅ done |
-| 3 | DL local restorers (NAFNet denoise/deblur, tiled inference on MPS) | next |
-| 4 | Orchestration + safety checks against over-editing | |
-| 5 | Polish, deploy (e.g. Hugging Face Spaces), portfolio write-up | |
+| 3 | Neural denoise + deblur (NAFNet, tiled full-res inference), replaces NL-means + unsharp | ✅ done |
+| 4 | Orchestrated `Pipeline` + output guardrail against over-editing | ✅ done |
+| 5 | Polish, deploy (e.g. Hugging Face Spaces), portfolio write-up | next |
 
 ## Scorecard
 
@@ -128,6 +142,58 @@ EfficientNet-B0 trunk. The model outputs the *probability* each defect is presen
 
 Result on those 31 photos: 21 left untouched (already-good iPhone shots), 8 clearly improved, 1 (an aurora
 with a bright horizon glow) still slightly washed out.
+
+## Phase 4: guardrail
+
+Every earlier stage decides from the *input*. The guardrail checks the *output* against the original
+for five signs of over-editing. If any limit is exceeded, it blends the edit back toward the original
+(100 → 85 → 70 … %) until all checks pass, and the app shows why (🛡 "Toned down to 70% to keep skin
+tones natural").
+
+| Check | Limit (relative to original) |
+|---|---|
+| Highlights newly blown | ≤ 3% of pixels |
+| Shadows newly crushed | ≤ 2% of pixels |
+| Skin color shift (a\*b\*, inside detected faces only) | ≤ 7 ΔE |
+| Newly garish colors (LAB chroma > 95) | ≤ 1% of pixels |
+| Fine-detail energy in smooth areas (noise, halos) | ≤ 1.8× |
+
+Limits were calibrated on the 31 real photos: they flag the visibly overdone cases but not the sunsets that
+were judged good. The skin check first used color alone and mistook orange sunset clouds for skin, so it
+now only looks inside faces (YuNet).
+
+**Results:**
+- **Real photos:** the guardrail adjusts 2/31 in Natural (blown skies) and 12/31 in Pro, almost all skin.
+  It catches Pro's residual face cooling, so the faces keep their warmth while keeping Pro's contrast.
+- **Synthetic benchmark (300 samples):** PSNR 19.68 → **19.81**, do-no-harm ΔE 2.85 → **2.65**, with SSIM
+  0.736 → 0.730 and ΔE 14.69 → 14.78. It tones down 46% of the synthetic samples: that damage is extreme
+  (e.g. −2.5 EV), so a full fix is a huge change, and the guardrail sometimes holds part of it back.
+  It's tuned for real photos.
+
+## Phase 3 scorecard: neural denoise + deblur
+
+A compact NAFNet (3.9M params, width 24) is trained for 70 min on DIV2K crops with realistic damage:
+signal-dependent and sometimes blotchy noise, gaussian/defocus/motion blur, JPEG, and 15% left clean.
+It only runs when the analyzer flags noise or blur, and it replaces NL-means and blur sharpening.
+
+DIV2K validation crops, 400 seeded samples, PSNR (dB) against the clean original:
+
+| Damage | Unedited | Classical (NL-means + unsharp) | **Neural** |
+|---|---|---|---|
+| noise | 28.40 | 29.14 | **32.02** (+2.9) |
+| blur | 26.23 | 26.63 | **27.02** (+0.4) |
+| noise + blur | 23.49 | 24.08 | **25.50** (+1.4) |
+| JPEG only | 32.57 | 32.25 | **33.21** (+1.0) |
+| clean | identical | 90.9 | 56.9 (both invisible) |
+
+End to end (`scripts/evaluate.py`, 300 samples): PSNR 19.45 → **19.68**, SSIM 0.708 → **0.736**, with
+do-no-harm unchanged at 2.85 because clean photos never reach the restorer. A 12 MP photo takes about 8 s.
+
+**Honest limits:**
+- Deblurring gains are modest (+0.4 dB). Real defocus is hard, and this is a small model with a short training run.
+- None of the 31 real test photos are genuinely noisy (iPhones denoise night shots), so real-world fixing is
+  validated on synthetic damage only. On those night photos the classical filter visibly smears texture and
+  stars, while the neural model leaves them almost untouched.
 
 ## Phase 2 scorecard: compared with a professional retoucher
 

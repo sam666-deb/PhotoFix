@@ -12,6 +12,7 @@ Editing happens in two passes, like a photographer's workflow:
      contrast, whites, vibrance and output sharpening, each only as much as that photo needs.
 """
 
+import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, replace
 
@@ -63,12 +64,15 @@ class EditParams:
     vibrance: float = 0.0  # saturation boost weighted toward muted colors
     sharpen_amount: float = 0.0
     style: float = 0.0  # 1.0 = the learned expert LUT was applied (Phase 2); informational, set by enhance()
+    restore: float = 0.0  # 1.0 = the neural restorer ran (Phase 3); informational, set by enhance()
 
     def is_identity(self) -> bool:
         return self == EditParams()
 
     def describe(self) -> list[str]:
         steps = []
+        if self.restore:
+            steps.append("Neural denoise & deblur")
         if self.style:
             steps.append("Expert color & tone (learned)")
         if self.denoise_h:
@@ -294,6 +298,19 @@ def apply_edits(rgb: np.ndarray, p: EditParams) -> np.ndarray:
     return out
 
 
+class _StageClock:
+    """Records milliseconds since the previous lap into an optional dict."""
+
+    def __init__(self, sink: dict[str, float] | None):
+        self.sink, self.t = sink, time.perf_counter()
+
+    def lap(self, stage: str) -> None:
+        now = time.perf_counter()
+        if self.sink is not None:
+            self.sink[stage] = round((now - self.t) * 1000, 1)
+        self.t = now
+
+
 # Global color/tone edits that the learned LUT takes over from the rules.
 LUT_REPLACES = dict(
     wb_r=1.0, wb_g=1.0, wb_b=1.0, saturation=1.0, black_point=0.0, white_point=1.0, gamma=1.0, highlight_recover=0.0
@@ -305,26 +322,45 @@ def enhance(
     strength: float = 1.0,
     net: ScoreModel | None = None,
     lut: Callable[[np.ndarray], np.ndarray] | None = None,
+    restorer: Callable[[np.ndarray], np.ndarray] | None = None,
     finish: bool = True,
+    timings: dict[str, float] | None = None,
 ) -> tuple[np.ndarray, Analysis, EditParams]:
-    """Analyze -> correct -> finish. With `lut` (a LUTEnhancer), the learned expert LUT does the global
-    color/tone work; the analyzer still drives denoising, local shadow recovery and sharpening."""
+    """Analyze -> restore -> correct -> finish.
+
+    With `restorer` (a Restorer), photos the analyzer flags as noisy or blurry are cleaned by the neural
+    restorer instead of NL-means + unsharp masking; clean photos never reach it. With `lut` (a LUTEnhancer),
+    the learned expert LUT does the global color/tone work. Restoration runs first: it was trained on
+    untouched pixels, and brightening/contrast would otherwise amplify the noise it has to remove.
+    Pass a dict as `timings` to get per-stage milliseconds.
+    """
+    clock = _StageClock(timings)
     rgb = np.clip(rgb, 0.0, 1.0).astype(np.float32, copy=False)
     analysis = analyze(rgb, net)
+    clock.lap("analyze")
     params = plan_edits(analysis)
-    base, denoised = rgb, 0.0
+    base, denoised, restored = rgb, 0.0, 0.0
+    flagged = max(analysis.scores["noise"], analysis.scores["blur"]) >= MIN_CONFIDENCE
+    if restorer is not None and flagged:
+        base, restored = restorer(rgb), 1.0
+        params = replace(params, denoise_h=0.0, sharpen_amount=0.0)  # replaced by the restorer
+        clock.lap("restore")
     if lut is not None:
         if params.denoise_h:  # denoise before the LUT, which may brighten (and so amplify) noise
-            base, denoised = apply_edits(rgb, EditParams(denoise_h=params.denoise_h)), params.denoise_h
+            base, denoised = apply_edits(base, EditParams(denoise_h=params.denoise_h)), params.denoise_h
         base = lut(base)
         params = replace(params, **LUT_REPLACES, denoise_h=0.0)
-    if finish and not (params.is_identity() and not denoised):  # nothing to fix = nothing to finish
+        clock.lap("style")
+    if finish and not (params.is_identity() and not denoised and not restored):  # nothing to fix = no finish
         preview = resize_max_side(base, PREVIEW_SIDE)
         corrected = apply_edits(preview, replace(params, denoise_h=0.0, sharpen_amount=0.0))
         params = plan_finish(corrected, params, analysis)
     out = apply_edits(base, params)
+    clock.lap("edits")
+    # Report what was actually done.
     if lut is not None:
-        params = replace(params, style=1.0, denoise_h=denoised)  # report what was done
+        params = replace(params, style=1.0, denoise_h=denoised)
+    params = replace(params, restore=restored)
     if strength != 1.0:
         out = np.clip(rgb + (out - rgb) * strength, 0.0, 1.0)
     return out, analysis, params

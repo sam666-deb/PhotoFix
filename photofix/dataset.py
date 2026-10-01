@@ -117,3 +117,49 @@ class FiveKPairs(Dataset):
         else:
             thumb = cv2.resize(inp, (self.thumb, self.thumb), interpolation=cv2.INTER_AREA)
         return to_tensor(thumb), to_tensor(np.ascontiguousarray(inp)), to_tensor(np.ascontiguousarray(tgt))
+
+
+class RestorationPatches(Dataset):
+    """Clean/degraded patch pairs for the restorer: (degraded, clean), both (3, crop, crop).
+
+    train=True: a random crop of a random photo with fresh damage each time (`per_image` crops are
+    drawn per photo per epoch). train=False: one fixed crop per photo with seeded damage, so the
+    validation set is identical across runs.
+    """
+
+    MARGIN = 16  # extra context so blur kernels near the patch edge see real pixels
+
+    def __init__(self, folder, train: bool, crop: int = 192, per_image: int = 1, seed: int = 0,
+                 with_labels: bool = False):
+        self.paths = list_images(folder)
+        if not self.paths:
+            raise FileNotFoundError(f"No images in {folder}.")
+        self.train, self.crop, self.per_image, self.seed = train, crop, per_image, seed
+        self.with_labels = with_labels
+
+    def __len__(self):
+        return len(self.paths) * self.per_image
+
+    def __getitem__(self, idx):
+        from photofix.degradations import restoration_degrade
+
+        rng = np.random.default_rng() if self.train else np.random.default_rng(self.seed * 1_000_003 + idx)
+        img = read_rgb(self.paths[idx % len(self.paths)])
+        size = self.crop + 2 * self.MARGIN
+        h, w = img.shape[:2]
+        if self.train:
+            if rng.random() < 0.5:  # also see detail at phone-photo scale, not only DIV2K's crisp 2K
+                scale = rng.uniform(0.5, 1.0)
+                img = cv2.resize(img, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+                h, w = img.shape[:2]
+            top, left = int(rng.integers(0, h - size + 1)), int(rng.integers(0, w - size + 1))
+        else:
+            top, left = (h - size) // 2, (w - size) // 2
+        patch = np.ascontiguousarray(img[top : top + size, left : left + size])
+        if self.train and rng.random() < 0.5:
+            patch = np.ascontiguousarray(patch[:, ::-1])
+        clean = patch[self.MARGIN : -self.MARGIN, self.MARGIN : -self.MARGIN]
+        degraded, labels = restoration_degrade(patch, rng, margin=self.MARGIN)
+        if self.with_labels:
+            return to_tensor(degraded), to_tensor(np.ascontiguousarray(clean)), labels
+        return to_tensor(degraded), to_tensor(np.ascontiguousarray(clean))

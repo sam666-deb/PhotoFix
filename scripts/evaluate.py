@@ -9,6 +9,8 @@ Usage:
   .venv/bin/python -m scripts.evaluate                      # built-in sample photos
   .venv/bin/python -m scripts.evaluate --images data/kodak  # your own folder of clean photos
   .venv/bin/python -m scripts.evaluate --images data/div2k/val --analyzer dl   # trained analyzer
+  .venv/bin/python -m scripts.evaluate --images data/div2k/val --analyzer dl \
+      --restorer checkpoints/restorer.pt --guardrail                            # full shipped pipeline
 """
 
 import argparse
@@ -18,11 +20,11 @@ from pathlib import Path
 
 import numpy as np
 
-from photofix import enhance
 from photofix.analyzer import DEFECTS
 from photofix.degradations import random_degrade
 from photofix.imageio import load_path, resize_max_side
 from photofix.metrics import all_metrics
+from photofix.pipeline import Pipeline
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".webp"}
 DETECT_THRESHOLD = 0.3
@@ -49,7 +51,15 @@ def main():
     ap.add_argument("--out", default="results")
     ap.add_argument("--analyzer", choices=["classical", "dl"], default="classical")
     ap.add_argument("--checkpoint", default="checkpoints/analyzer.pt")
+    ap.add_argument("--restorer", default=None, help="neural restorer checkpoint, e.g. checkpoints/restorer.pt")
+    ap.add_argument("--guardrail", action="store_true", help="apply the Phase 4 output guardrail")
     args = ap.parse_args()
+
+    restorer = None
+    if args.restorer:
+        from photofix.restore import Restorer
+
+        restorer = Restorer(args.restorer)
 
     net = None
     if args.analyzer == "dl":
@@ -57,6 +67,8 @@ def main():
 
         net = DLAnalyzer(args.checkpoint)
 
+    pipeline = Pipeline(analyzer=net, restorer=restorer, guardrail=args.guardrail)
+    adjusted = 0
     rng = np.random.default_rng(args.seed)
     images = load_images(args.images, args.max_side)
     rows, no_harm = [], []
@@ -64,12 +76,14 @@ def main():
     start = time.perf_counter()
 
     for name, clean in images.items():
-        out, _, _ = enhance(clean, net=net)
+        out = pipeline.run(clean).image
         no_harm.append(all_metrics(out, clean)["delta_e"])
 
         for _ in range(args.per_image):
             degraded, labels = random_degrade(clean, rng)
-            out, analysis, _ = enhance(degraded, net=net)
+            result = pipeline.run(degraded)
+            out, analysis = result.image, result.analysis
+            adjusted += result.guard.adjusted
             before, after = all_metrics(degraded, clean), all_metrics(out, clean)
             rows.append({"image": name, "labels": labels, "scores": analysis.scores, "before": before, "after": after})
             for d in DEFECTS:
@@ -86,6 +100,9 @@ def main():
 
     summary = {
         "analyzer": args.analyzer,
+        "restorer": bool(restorer),
+        "guardrail": args.guardrail,
+        "guardrail_adjusted_pct": 100.0 * adjusted / max(len(rows), 1),
         "n_images": len(images),
         "n_samples": len(rows),
         "restoration": {
@@ -104,11 +121,13 @@ def main():
         "seconds": round(time.perf_counter() - start, 1),
     }
 
-    print(f"\n[{args.analyzer} analyzer] {summary['n_samples']} degraded samples from {summary['n_images']} images ({summary['seconds']} s)\n")
+    print(f"\n[{args.analyzer} analyzer{' + neural restorer' if restorer else ''}] {summary['n_samples']} degraded samples from {summary['n_images']} images ({summary['seconds']} s)\n")
     print(f"{'metric':<10}{'degraded':>10}{'enhanced':>10}")
     for m, v in summary["restoration"].items():
         print(f"{m:<10}{v['degraded']:>10.3f}{v['enhanced']:>10.3f}")
     print(f"\nImproved (PSNR up): {summary['improved_pct']:.0f}% of samples")
+    if args.guardrail:
+        print(f"Guardrail toned down: {summary['guardrail_adjusted_pct']:.0f}% of samples")
     print(f"Do-no-harm ΔE on clean photos: {summary['no_harm_delta_e']:.2f}  (lower is better, <2.3 ≈ invisible)\n")
     print(f"{'defect':<15}{'precision':>10}{'recall':>8}{'n':>5}")
     for d, v in summary["detection"].items():

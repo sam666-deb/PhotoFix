@@ -16,7 +16,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from photofix import enhance
+from photofix.pipeline import Pipeline
 from photofix.imageio import load_path, to_uint8
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".heic", ".heif", ".webp", ".tif", ".tiff"}
@@ -41,22 +41,13 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--images", required=True)
     ap.add_argument("--out", default="results/gallery")
-    ap.add_argument("--analyzer", choices=["classical", "dl"], default="dl")
-    ap.add_argument("--checkpoint", default="checkpoints/analyzer.pt")
-    ap.add_argument("--lut", default=None, help="learned LUT checkpoint, e.g. checkpoints/lut.pt")
+    ap.add_argument("--style", choices=["natural", "pro"], default="natural")
+    ap.add_argument("--no-guardrail", action="store_true", help="skip the Phase 4 output guardrail")
+    ap.add_argument("--checkpoints", default="checkpoints")
     args = ap.parse_args()
 
-    lut = None
-    if args.lut:
-        from photofix.lut import LUTEnhancer
-
-        lut = LUTEnhancer(args.lut)
-
-    net = None
-    if args.analyzer == "dl":
-        from photofix.net import DLAnalyzer
-
-        net = DLAnalyzer(args.checkpoint)
+    pipeline = Pipeline.load(args.checkpoints, guardrail=not args.no_guardrail)
+    print(f"pipeline: {pipeline.describe()}  style: {args.style}")
 
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -65,7 +56,8 @@ def main():
     for i, path in enumerate(paths, 1):
         rgb = load_path(path)
         start = time.perf_counter()
-        out, analysis, params = enhance(rgb, net=net, lut=lut)
+        result = pipeline.run(rgb, args.style)
+        out, analysis = result.image, result.analysis
         elapsed = time.perf_counter() - start
         write_jpeg(out_dir / f"{path.stem}.jpg", side_by_side(rgb, out))
         rows.append(side_by_side(rgb, out, SHEET_ROW_HEIGHT))
@@ -74,7 +66,8 @@ def main():
             "file": path.name,
             "size": [rgb.shape[1], rgb.shape[0]],
             "defects": {k: v for k, v in analysis.scores.items() if v >= 0.3},
-            "edits": params.describe(),
+            "edits": result.steps,
+            "guardrail": result.guard.to_dict(),
             "seconds": round(elapsed, 2),
         })
         print(f"{i:3d}. {path.name[:40]:40s} {', '.join(report[-1]['defects']) or 'no defects':45s} {elapsed:.1f}s")

@@ -85,3 +85,6 @@ button.secondary { background: var(--bar); color: var(--text); }
 .segmented button[aria-checked="true"] { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,.15); }
 .segmented button:disabled { opacity: .4; cursor: not-allowed; }
 .compare.loading { opacity: .55; transition: opacity .15s; cursor: progress; }
+.steps li.guard { list-style: none; margin-left: -20px; padding: 6px 10px; border-radius: 6px;
+  background: color-mix(in srgb, var(--warn) 14%, transparent); color: var(--text); }
+.steps li.guard::before { content: "🛡 "; }
