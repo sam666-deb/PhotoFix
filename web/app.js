@@ -176,7 +176,25 @@ fetch("/api/health")
 $("strength").addEventListener("input", render);
 $("split").addEventListener("input", (e) => setSplit(e.target.value));
 
+// Implicit feedback: the style and strength someone actually keeps tells us how good the defaults are.
+function sendFeedback() {
+  const data = results.get(currentStyle)?.data;
+  if (!data) return;
+  fetch("/api/feedback", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      style: currentStyle,
+      strength: $("strength").value / 100,
+      guard_strength: data.guardrail?.strength ?? 1,
+      defects: data.analysis.defects,
+      steps: data.steps,
+    }),
+  }).catch(() => {});
+}
+
 $("download").addEventListener("click", () => {
+  sendFeedback();
   $("after").toBlob((blob) => {
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);

@@ -88,3 +88,4 @@ button.secondary { background: var(--bar); color: var(--text); }
 .steps li.guard { list-style: none; margin-left: -20px; padding: 6px 10px; border-radius: 6px;
   background: color-mix(in srgb, var(--warn) 14%, transparent); color: var(--text); }
 .steps li.guard::before { content: "🛡 "; }
+.rate-link { color: var(--accent); text-decoration: none; margin-left: 8px; white-space: nowrap; }

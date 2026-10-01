@@ -51,6 +51,8 @@ photo ─► [A] Analyzer ─► defect scores ─► [B] plan_edits ─► Edit
 | `photofix/metrics.py` | PSNR, SSIM, ΔE |
 | `scripts/evaluate.py` | Scorecard: restoration quality, "do no harm", per-defect precision/recall |
 | `scripts/train_analyzer.py` | Trains the DL analyzer, saves the best checkpoint by validation loss |
+| `photofix/ratings.py`, `server/rating.py`, `web/rate.*` | Blind A/B rating page, Bradley–Terry leaderboard, editor feedback log |
+| `scripts/build_rating_set.py`, `analyze_ratings.py` | Pre-render variants for rating; report rankings and feedback |
 | `photofix/pipeline.py` | Phase 4: loads available models, runs analyze → restore → style → edits → guardrail, with per-stage timings |
 | `photofix/guardrail.py` | Phase 4: checks the *result* (highlights, shadows, skin tones in detected faces, saturation, noise/halos) and blends back if needed |
 | `models/` | Bundled YuNet face detector (MIT) used by the guardrail's skin check |
@@ -142,6 +144,25 @@ EfficientNet-B0 trunk. The model outputs the *probability* each defect is presen
 
 Result on those 31 photos: 21 left untouched (already-good iPhone shots), 8 clearly improved, 1 (an aurora
 with a bright horizon glow) still slightly washed out.
+
+## Human ratings: the final scorecard
+
+Metrics and eyes disagreed several times in this project, so people get the last word:
+
+```bash
+.venv/bin/python -m scripts.build_rating_set --images "Original Photos"   # pre-render every variant
+.venv/bin/uvicorn server.main:app --reload                                # rate at http://127.0.0.1:8000/rate.html
+.venv/bin/python -m scripts.analyze_ratings                               # leaderboard + feedback report
+```
+
+- **Blind A/B:** two versions of the same photo in random order, with no labels. Rate with ←/→ (better),
+  ↓ (same) or X (both bad). The unedited original is one of the variants, so "is editing even worth it?"
+  gets measured too. Pixel-identical variants are never shown against each other.
+- **Ranking:** Bradley–Terry strengths, reported as "chance of being preferred over the original" with 90%
+  bootstrap intervals. A lead only counts once the intervals separate, roughly after 30–50 ratings.
+- **Implicit feedback:** each download in the editor logs the style and strength kept. A defect where people
+  keep lowering the strength is one the defaults overcorrect.
+- **Privacy:** ratings and feedback stay in `data/ratings/` (gitignored), and the rating set in `data/rating/`.
 
 ## Phase 4: guardrail
 

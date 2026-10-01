@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PhotoFix Rating</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="rate.css">
+</head>
+<body>
+  <header class="rate-header">
+    <div>
+      <h1>Which looks better?</h1>
+      <p class="tagline">Two versions of the same photo, in random order. Trust your first impression.</p>
+    </div>
+    <nav><a href="/">← Editor</a></nav>
+  </header>
+
+  <main>
+    <p id="status" class="meta" role="status">Loading…</p>
+
+    <section id="pair" class="pair" hidden>
+      <figure><img id="left" alt="Version A"><figcaption>A</figcaption></figure>
+      <figure><img id="right" alt="Version B"><figcaption>B</figcaption></figure>
+    </section>
+
+    <div id="choices" class="choices" hidden>
+      <button type="button" data-choice="left"><kbd>←</kbd> A is better</button>
+      <button type="button" data-choice="same" class="secondary"><kbd>↓</kbd> About the same</button>
+      <button type="button" data-choice="both_bad" class="secondary"><kbd>X</kbd> Both look bad</button>
+      <button type="button" data-choice="right">B is better <kbd>→</kbd></button>
+    </div>
+
+    <div class="rate-footer">
+      <label class="rater">Your name (optional)
+        <input id="rater" maxlength="40" placeholder="anonymous" autocomplete="off">
+      </label>
+      <span id="progress" class="meta"></span>
+    </div>
+
+    <details id="board-wrap" class="board">
+      <summary>Leaderboard</summary>
+      <p class="meta">Chance each version is preferred over the unedited photo. 50% = no better than doing
+        nothing. Bars show the 90% confidence range: a lead only counts once the ranges stop overlapping.</p>
+      <table>
+        <thead><tr><th>Version</th><th>Preferred over original</th><th>W / L / T</th></tr></thead>
+        <tbody id="board"></tbody>
+      </table>
+      <p id="board-meta" class="meta"></p>
+    </details>
+  </main>
+
+  <script src="rate.js"></script>
+</body>
+</html>

@@ -18,6 +18,8 @@ from PIL import UnidentifiedImageError
 
 from photofix.imageio import BROWSER_FORMATS, encode_jpeg, image_format, load_image
 from photofix.pipeline import CHECKPOINTS, Pipeline
+from server.rating import RATING_SET
+from server.rating import router as rating_router
 
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
@@ -31,6 +33,7 @@ pipeline = Pipeline.load(
 )
 STYLES = pipeline.styles
 app = FastAPI(title="PhotoFix")
+app.include_router(rating_router)
 
 
 def _read_upload(file: UploadFile):
@@ -73,4 +76,7 @@ def enhance_image(file: UploadFile = File(...), style: str = Form("natural")):
     return response
 
 
+# Pre-rendered variants for /rate.html (local only; built by scripts/build_rating_set.py).
+RATING_SET.mkdir(parents=True, exist_ok=True)
+app.mount("/rating", StaticFiles(directory=RATING_SET), name="rating")
 app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")
