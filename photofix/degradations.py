@@ -8,6 +8,7 @@ and is what the evaluation harness uses to score the pipeline.
 import cv2
 import numpy as np
 
+from photofix.analyzer import DEFECTS
 from photofix.imageio import to_uint8
 
 
@@ -28,20 +29,21 @@ def color_cast(rgb: np.ndarray, gains: tuple[float, float, float]) -> np.ndarray
 
 def harsh_shadows(rgb: np.ndarray, amount: float) -> np.ndarray:
     """Crush the shadows (lower tones darkened, highlights kept)."""
-    return np.clip(rgb ** (1.0 + 1.5 * amount), 0.0, 1.0)
+    return np.clip(rgb, 0.0, 1.0) ** (1.0 + 1.5 * amount)
 
 
 def gaussian_noise(rgb: np.ndarray, sigma: float, rng: np.random.Generator) -> np.ndarray:
     """Signal-dependent sensor-like noise: shot noise + read noise."""
     std = np.sqrt(sigma**2 * 0.5 + rgb * sigma**2)
-    return np.clip(rgb + rng.normal(size=rgb.shape).astype(np.float32) * std, 0.0, 1.0)
+    return np.clip(rgb + rng.standard_normal(rgb.shape, dtype=np.float32) * std, 0.0, 1.0)
 
 
 def defocus_blur(rgb: np.ndarray, radius: float) -> np.ndarray:
     r = max(1, int(round(radius)))
     kernel = np.zeros((2 * r + 1, 2 * r + 1), np.float32)
     cv2.circle(kernel, (r, r), r, 1.0, -1)
-    return cv2.filter2D(rgb, -1, kernel / kernel.sum())
+    # filter2D uses an FFT for large kernels, which can leave tiny negative values; clip them.
+    return np.clip(cv2.filter2D(rgb, -1, kernel / kernel.sum()), 0.0, 1.0)
 
 
 def motion_blur(rgb: np.ndarray, length: int, angle: float) -> np.ndarray:
@@ -49,7 +51,7 @@ def motion_blur(rgb: np.ndarray, length: int, angle: float) -> np.ndarray:
     kernel[length // 2, :] = 1.0
     rot = cv2.getRotationMatrix2D((length / 2 - 0.5, length / 2 - 0.5), angle, 1.0)
     kernel = cv2.warpAffine(kernel, rot, (length, length))
-    return cv2.filter2D(rgb, -1, kernel / max(kernel.sum(), 1e-6))
+    return np.clip(cv2.filter2D(rgb, -1, kernel / max(kernel.sum(), 1e-6)), 0.0, 1.0)
 
 
 def jpeg(rgb: np.ndarray, quality: int) -> np.ndarray:
@@ -58,13 +60,17 @@ def jpeg(rgb: np.ndarray, quality: int) -> np.ndarray:
 
 
 def random_degrade(
-    rgb: np.ndarray, rng: np.random.Generator, max_defects: int = 3
+    rgb: np.ndarray, rng: np.random.Generator, max_defects: int = 3, p_clean: float = 0.0
 ) -> tuple[np.ndarray, dict[str, float]]:
-    """Apply 1..max_defects random defects. Returns (degraded, labels) with labels as severity in [0, 1]."""
+    """Apply 1..max_defects random defects. Returns (degraded, labels) with labels as severity in [0, 1].
+
+    With probability p_clean the image is returned untouched (all labels 0), so a model trained on this
+    data also learns what a photo that needs no fixing looks like.
+    """
     out = rgb.astype(np.float32, copy=True)
-    labels = dict.fromkeys(
-        ("underexposure", "overexposure", "low_contrast", "harsh_shadows", "color_cast", "noise", "blur"), 0.0
-    )
+    labels = dict.fromkeys(DEFECTS, 0.0)
+    if rng.random() < p_clean:
+        return out, labels
     exposure_kind = rng.choice(["underexposure", "overexposure"])
     candidates = [exposure_kind, "low_contrast", "harsh_shadows", "color_cast", "noise", "blur"]
     chosen = rng.choice(candidates, size=rng.integers(1, max_defects + 1), replace=False)
@@ -108,4 +114,4 @@ def random_degrade(
 
     if rng.random() < 0.3:
         out = jpeg(out, int(rng.integers(60, 95)))
-    return out.astype(np.float32), {k: round(float(v), 3) for k, v in labels.items()}
+    return np.clip(out, 0.0, 1.0).astype(np.float32), {k: round(float(v), 3) for k, v in labels.items()}

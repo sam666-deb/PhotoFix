@@ -67,3 +67,44 @@ def test_jpeg_roundtrip(astronaut):
     rgb, _ = load_image(encode_jpeg(astronaut))
     assert rgb.shape == astronaut.shape
     assert psnr(rgb, astronaut) > 35
+
+
+def test_shadow_lift_does_not_tint_near_black():
+    # A near-black pixel with a faint blue bias used to be scaled ~50x into saturated blue.
+    img = np.full((64, 64, 3), [0.004, 0.006, 0.02], dtype=np.float32)
+    out = apply_edits(img, EditParams(shadow_lift=0.6, gamma=0.8))
+    r, g, b = out[0, 0]
+    assert out.mean() > img.mean()  # it was lifted
+    assert b - r < 0.05  # ...but stayed close to neutral
+
+
+def _analysis(**scores):
+    from photofix.analyzer import Analysis
+
+    return Analysis(scores={d: scores.get(d, 0.0) for d in DEFECTS}, stats={"median": 0.45, "p99": 0.9})
+
+
+def test_finish_adds_contrast_only_when_flat(astronaut):
+    from photofix.enhancer import plan_finish
+
+    flat = 0.4 + 0.2 * astronaut  # washed-out version
+    params = EditParams(shadow_lift=0.5)
+    assert plan_finish(flat, params, _analysis()).contrast > 0.2
+    assert plan_finish(astronaut, params, _analysis()).contrast < 0.1
+
+
+def test_finish_backs_off_sharpening_on_noisy_photos(astronaut):
+    from photofix.enhancer import plan_finish
+
+    params = EditParams(shadow_lift=0.5)
+    assert plan_finish(astronaut, params, _analysis()).sharpen_amount > 0
+    assert plan_finish(astronaut, params, _analysis(noise=0.8)).sharpen_amount == 0
+
+
+def test_shadow_lift_keeps_local_contrast(astronaut):
+    # Lifting shadows should brighten dark areas without flattening their texture.
+    dark = astronaut * 0.35
+    out, _, params = enhance(dark)
+    assert params.clarity > 0
+    assert np.median(out) > np.median(dark)
+    assert out.std() > dark.std()

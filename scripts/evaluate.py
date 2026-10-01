@@ -8,6 +8,7 @@ For each clean image it creates N randomly degraded copies (known labels), runs 
 Usage:
   .venv/bin/python -m scripts.evaluate                      # built-in sample photos
   .venv/bin/python -m scripts.evaluate --images data/kodak  # your own folder of clean photos
+  .venv/bin/python -m scripts.evaluate --images data/div2k/val --analyzer dl   # trained analyzer
 """
 
 import argparse
@@ -46,7 +47,15 @@ def main():
     ap.add_argument("--max-side", type=int, default=1024)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out", default="results")
+    ap.add_argument("--analyzer", choices=["classical", "dl"], default="classical")
+    ap.add_argument("--checkpoint", default="checkpoints/analyzer.pt")
     args = ap.parse_args()
+
+    net = None
+    if args.analyzer == "dl":
+        from photofix.net import DLAnalyzer
+
+        net = DLAnalyzer(args.checkpoint)
 
     rng = np.random.default_rng(args.seed)
     images = load_images(args.images, args.max_side)
@@ -55,12 +64,12 @@ def main():
     start = time.perf_counter()
 
     for name, clean in images.items():
-        out, _, _ = enhance(clean)
+        out, _, _ = enhance(clean, net=net)
         no_harm.append(all_metrics(out, clean)["delta_e"])
 
         for _ in range(args.per_image):
             degraded, labels = random_degrade(clean, rng)
-            out, analysis, _ = enhance(degraded)
+            out, analysis, _ = enhance(degraded, net=net)
             before, after = all_metrics(degraded, clean), all_metrics(out, clean)
             rows.append({"image": name, "labels": labels, "scores": analysis.scores, "before": before, "after": after})
             for d in DEFECTS:
@@ -76,6 +85,7 @@ def main():
         return float(np.mean([r[key][metric] for r in rows]))
 
     summary = {
+        "analyzer": args.analyzer,
         "n_images": len(images),
         "n_samples": len(rows),
         "restoration": {
@@ -94,7 +104,7 @@ def main():
         "seconds": round(time.perf_counter() - start, 1),
     }
 
-    print(f"\n{summary['n_samples']} degraded samples from {summary['n_images']} images ({summary['seconds']} s)\n")
+    print(f"\n[{args.analyzer} analyzer] {summary['n_samples']} degraded samples from {summary['n_images']} images ({summary['seconds']} s)\n")
     print(f"{'metric':<10}{'degraded':>10}{'enhanced':>10}")
     for m, v in summary["restoration"].items():
         print(f"{m:<10}{v['degraded']:>10.3f}{v['enhanced']:>10.3f}")
@@ -106,7 +116,7 @@ def main():
 
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_file = out_dir / f"eval_{time.strftime('%Y%m%d_%H%M%S')}.json"
+    out_file = out_dir / f"eval_{args.analyzer}_{time.strftime('%Y%m%d_%H%M%S')}.json"
     out_file.write_text(json.dumps({"summary": summary, "samples": rows}, indent=2))
     print(f"\nSaved {out_file}")
 

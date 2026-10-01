@@ -8,3 +8,4 @@ scikit-image
 torch
 pytest
 httpx
+pillow-heif

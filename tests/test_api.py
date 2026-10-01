@@ -29,3 +29,15 @@ def test_serves_web_ui():
     res = client.get("/")
     assert res.status_code == 200
     assert "PhotoFix" in res.text
+
+
+def test_heic_upload_returns_original_for_browser():
+    import io
+
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.fromarray(data.astronaut()).save(buf, "HEIF")
+    res = client.post("/api/enhance", files={"file": ("photo.heic", buf.getvalue(), "image/heic")})
+    assert res.status_code == 200
+    assert res.json()["original"].startswith("data:image/jpeg;base64,")

@@ -50,11 +50,12 @@ function showReport(data) {
   );
   const steps = data.steps.length ? data.steps : ["No edits needed. This photo already looks good."];
   $("steps").replaceChildren(...steps.map((s) => Object.assign(document.createElement("li"), { textContent: s })));
-  $("meta").textContent = `${data.width}×${data.height} · processed in ${(data.elapsed_ms / 1000).toFixed(2)} s`;
+  const analyzer = data.analysis.source === "dl" ? "neural analyzer" : "classical analyzer";
+  $("meta").textContent = `${data.width}×${data.height} · ${analyzer} · processed in ${(data.elapsed_ms / 1000).toFixed(2)} s`;
 }
 
 async function handleFile(file) {
-  if (!file || !file.type.startsWith("image/")) return;
+  if (!file || !(file.type.startsWith("image/") || /\.hei[cf]$/i.test(file.name))) return;
   fileName = file.name.replace(/\.[^.]+$/, "") || "photo";
   const drop = $("drop");
   drop.classList.add("busy");
@@ -66,13 +67,16 @@ async function handleFile(file) {
     body.append("file", file);
     const [res, orig] = await Promise.all([
       fetch("/api/enhance", { method: "POST", body }),
-      createImageBitmap(file, { imageOrientation: "from-image" }),
+      // Browsers that can't decode a format (e.g. HEIC in Chrome) get the original from the server instead.
+      createImageBitmap(file, { imageOrientation: "from-image" }).catch(() => null),
     ]);
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || `Server error ${res.status}`);
 
-    original = orig;
-    enhanced = await createImageBitmap(await (await fetch(data.image)).blob());
+    const fromDataUrl = async (url) => createImageBitmap(await (await fetch(url)).blob());
+    original = orig ?? (data.original ? await fromDataUrl(data.original) : null);
+    if (!original) throw new Error("This browser can't display that image format.");
+    enhanced = await fromDataUrl(data.image);
 
     for (const id of ["before", "after"]) {
       $(id).width = original.width;

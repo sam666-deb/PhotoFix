@@ -1,10 +1,13 @@
 """Stage A (baseline): classical defect analyzer.
 
 Scores each defect in [0, 1] (0 = no problem, 1 = severe). These hand-tuned heuristics are the
-baseline that the deep-learning analyzer (Phase 1) must beat on the evaluation harness.
+baseline that the deep-learning analyzer must beat on the evaluation harness. When a trained model is
+passed (`analyze(rgb, net=DLAnalyzer(...))`) its scores replace the heuristic ones; the image statistics
+are always computed here, because `plan_edits` uses them to decide how much to correct.
 """
 
 from dataclasses import dataclass, field
+from typing import Protocol
 
 import cv2
 import numpy as np
@@ -17,16 +20,23 @@ PREVIEW_SIDE = 1024
 NOISE_CROP = 1024
 
 
+class ScoreModel(Protocol):
+    name: str
+
+    def predict(self, rgb: np.ndarray) -> dict[str, float]: ...
+
+
 @dataclass
 class Analysis:
     scores: dict[str, float]
     stats: dict[str, float] = field(default_factory=dict)
+    source: str = "classical"
 
     def defects(self, threshold: float = 0.5) -> list[str]:
         return [name for name, score in self.scores.items() if score >= threshold]
 
     def to_dict(self) -> dict:
-        return {"scores": self.scores, "stats": self.stats, "defects": self.defects()}
+        return {"scores": self.scores, "stats": self.stats, "defects": self.defects(), "source": self.source}
 
 
 def luminance(rgb: np.ndarray) -> np.ndarray:
@@ -62,7 +72,7 @@ def estimate_illuminant(rgb: np.ndarray, p: int = 6, sigma: float = 1.0) -> np.n
     return (e / e.mean()).astype(np.float32)
 
 
-def analyze(rgb: np.ndarray) -> Analysis:
+def analyze(rgb: np.ndarray, net: ScoreModel | None = None) -> Analysis:
     rgb = np.clip(rgb, 0.0, 1.0)
     small = resize_max_side(rgb, PREVIEW_SIDE)
     y = luminance(small)
@@ -101,4 +111,6 @@ def analyze(rgb: np.ndarray) -> Analysis:
         "noise_sigma": noise_sigma,
         "laplacian_var": lap_var,
     }
+    if net is not None:
+        return Analysis(scores=net.predict(rgb), stats=stats, source=net.name)
     return Analysis(scores={k: round(v, 3) for k, v in scores.items()}, stats=stats)

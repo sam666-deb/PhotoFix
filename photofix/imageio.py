@@ -5,6 +5,15 @@ import io
 import cv2
 import numpy as np
 from PIL import Image, ImageOps
+from pillow_heif import register_heif_opener
+
+register_heif_opener()  # iPhone photos (HEIC/HEIF)
+
+BROWSER_FORMATS = {"JPEG", "MPO", "PNG", "WEBP", "GIF", "BMP"}
+
+
+def image_format(data: bytes) -> str | None:
+    return Image.open(io.BytesIO(data)).format
 
 
 def load_image(data: bytes) -> tuple[np.ndarray, bytes | None]:

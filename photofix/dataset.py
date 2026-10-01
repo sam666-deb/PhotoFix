@@ -1,0 +1,72 @@
+"""Training data for the defect analyzer: clean photos + on-the-fly synthetic defects."""
+
+from pathlib import Path
+
+import cv2
+import numpy as np
+import torch
+from torch.utils.data import Dataset
+
+from photofix.analyzer import DEFECTS
+from photofix.degradations import random_degrade
+from photofix.net import make_views, to_tensor
+
+IMAGE_EXTS = {".jpg", ".jpeg", ".png"}
+
+
+def list_images(folder: str | Path) -> list[Path]:
+    return sorted(p for p in Path(folder).iterdir() if p.suffix.lower() in IMAGE_EXTS)
+
+
+def read_rgb(path: Path) -> np.ndarray:
+    bgr = cv2.imread(str(path), cv2.IMREAD_COLOR)
+    if bgr is None:
+        raise OSError(f"Could not read {path}")
+    return cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
+
+
+class DegradedPhotos(Dataset):
+    """Each item: (global_view, local_view, presence[7], severity[7]).
+
+    train=True: random composition crop, flip, and resolution, with a fresh random defect mix every epoch.
+    train=False: fixed size, and each index is seeded, so the validation set is identical on every run.
+    """
+
+    def __init__(self, folder, train: bool, repeat: int = 1, p_clean: float = 0.25, seed: int = 0):
+        self.paths = list_images(folder)
+        if not self.paths:
+            raise FileNotFoundError(f"No images in {folder}. Run scripts/prepare_data.py first.")
+        self.train, self.repeat, self.p_clean, self.seed = train, repeat, p_clean, seed
+
+    def __len__(self):
+        return len(self.paths) * self.repeat
+
+    def __getitem__(self, idx):
+        rng = np.random.default_rng() if self.train else np.random.default_rng(self.seed * 1_000_003 + idx)
+        img = read_rgb(self.paths[idx % len(self.paths)])
+
+        if self.train:
+            h, w = img.shape[:2]
+            frac = np.sqrt(rng.uniform(0.6, 1.0))
+            ch, cw = int(h * frac), int(w * frac)
+            top, left = int(rng.integers(0, h - ch + 1)), int(rng.integers(0, w - cw + 1))
+            img = img[top : top + ch, left : left + cw]
+            if rng.random() < 0.5:
+                img = img[:, ::-1]
+            side = int(rng.integers(1024, 2049))
+        else:
+            side = 1536
+        scale = side / max(img.shape[:2])
+        if scale < 1.0:
+            img = cv2.resize(img, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+        img = np.ascontiguousarray(img)
+
+        degraded, labels = random_degrade(img, rng, p_clean=self.p_clean)
+        g, l = make_views(degraded, rng if self.train else None)
+        severity = torch.tensor([labels[d] for d in DEFECTS], dtype=torch.float32)
+        return to_tensor(g), to_tensor(l), (severity > 0).float(), severity
+
+
+def worker_init(_):
+    cv2.setNumThreads(1)
+    torch.set_num_threads(1)
