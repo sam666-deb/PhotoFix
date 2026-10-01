@@ -79,3 +79,9 @@ button.secondary { background: var(--bar); color: var(--text); }
 .steps li { margin-bottom: 4px; }
 .meta { color: var(--muted); font-size: 13px; margin: 0; }
 .error { color: var(--bad); }
+
+.segmented { display: inline-flex; background: var(--bar); border-radius: 8px; padding: 3px; gap: 2px; }
+.segmented button { background: transparent; color: var(--muted); padding: 5px 14px; border-radius: 6px; }
+.segmented button[aria-checked="true"] { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,.15); }
+.segmented button:disabled { opacity: .4; cursor: not-allowed; }
+.compare.loading { opacity: .55; transition: opacity .15s; cursor: progress; }

@@ -8,7 +8,7 @@ import os
 import time
 from pathlib import Path
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.staticfiles import StaticFiles
 from PIL import UnidentifiedImageError
 
@@ -19,6 +19,7 @@ MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 ROOT = Path(__file__).resolve().parent.parent
 WEB_DIR = ROOT / "web"
 CHECKPOINT = Path(os.environ.get("PHOTOFIX_CHECKPOINT", ROOT / "checkpoints" / "analyzer.pt"))
+LUT_CHECKPOINT = Path(os.environ.get("PHOTOFIX_LUT_CHECKPOINT", ROOT / "checkpoints" / "lut.pt"))
 
 
 def _load_net():
@@ -30,7 +31,17 @@ def _load_net():
     return DLAnalyzer(CHECKPOINT)
 
 
+def _load_lut():
+    """The learned expert LUT behind the "pro" style; PHOTOFIX_LUT=off disables it."""
+    if os.environ.get("PHOTOFIX_LUT") == "off" or not LUT_CHECKPOINT.exists():
+        return None
+    from photofix.lut import LUTEnhancer
+
+    return LUTEnhancer(LUT_CHECKPOINT)
+
+
 net = _load_net()
+lut = _load_lut()
 app = FastAPI(title="PhotoFix")
 
 
@@ -49,17 +60,24 @@ def _data_url(jpeg: bytes) -> str:
     return "data:image/jpeg;base64," + base64.b64encode(jpeg).decode()
 
 
+# natural: rule-based corrections + finishing (vivid, suits already-processed phone photos)
+# pro:     global color/tone learned from a professional retoucher (MIT-Adobe FiveK, Expert C)
+STYLES = ("natural", "pro") if lut else ("natural",)
+
+
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "analyzer": net.name if net else "classical"}
+    return {"status": "ok", "analyzer": net.name if net else "classical", "styles": list(STYLES)}
 
 
 # Sync handlers run in FastAPI's threadpool, so heavy image work doesn't block the event loop.
 @app.post("/api/enhance")
-def enhance_image(file: UploadFile = File(...)):
+def enhance_image(file: UploadFile = File(...), style: str = Form("natural")):
+    if style not in STYLES:
+        raise HTTPException(400, f"Unknown or unavailable style {style!r}; available: {', '.join(STYLES)}.")
     rgb, icc, browser_can_decode = _read_upload(file)
     start = time.perf_counter()
-    out, analysis, params = enhance(rgb, net=net)
+    out, analysis, params = enhance(rgb, net=net, lut=lut if style == "pro" else None)
     elapsed_ms = round((time.perf_counter() - start) * 1000)
     response = {
         "analysis": analysis.to_dict(),
@@ -68,6 +86,7 @@ def enhance_image(file: UploadFile = File(...)):
         "width": rgb.shape[1],
         "height": rgb.shape[0],
         "elapsed_ms": elapsed_ms,
+        "style": style,
         "image": _data_url(encode_jpeg(out, icc=icc)),
     }
     if not browser_can_decode:  # e.g. HEIC in Chrome: send the original too, for the before view

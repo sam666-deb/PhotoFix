@@ -43,7 +43,14 @@ def main():
     ap.add_argument("--out", default="results/gallery")
     ap.add_argument("--analyzer", choices=["classical", "dl"], default="dl")
     ap.add_argument("--checkpoint", default="checkpoints/analyzer.pt")
+    ap.add_argument("--lut", default=None, help="learned LUT checkpoint, e.g. checkpoints/lut.pt")
     args = ap.parse_args()
+
+    lut = None
+    if args.lut:
+        from photofix.lut import LUTEnhancer
+
+        lut = LUTEnhancer(args.lut)
 
     net = None
     if args.analyzer == "dl":
@@ -58,7 +65,7 @@ def main():
     for i, path in enumerate(paths, 1):
         rgb = load_path(path)
         start = time.perf_counter()
-        out, analysis, params = enhance(rgb, net=net)
+        out, analysis, params = enhance(rgb, net=net, lut=lut)
         elapsed = time.perf_counter() - start
         write_jpeg(out_dir / f"{path.stem}.jpg", side_by_side(rgb, out))
         rows.append(side_by_side(rgb, out, SHEET_ROW_HEIGHT))

@@ -10,9 +10,14 @@ const LABELS = {
   blur: "Blur / soft focus",
 };
 
+const STYLE_LABELS = { natural: "Natural style", pro: "Pro style (learned from a professional retoucher)" };
+
 let original = null; // ImageBitmap
 let enhanced = null; // ImageBitmap
 let fileName = "photo";
+let currentFile = null;
+let currentStyle = "natural";
+let results = new Map(); // style -> { data, enhanced } for the current photo, so switching back is instant
 
 function severityColor(score) {
   if (score >= 0.5) return "var(--bad)";
@@ -51,32 +56,67 @@ function showReport(data) {
   const steps = data.steps.length ? data.steps : ["No edits needed. This photo already looks good."];
   $("steps").replaceChildren(...steps.map((s) => Object.assign(document.createElement("li"), { textContent: s })));
   const analyzer = data.analysis.source === "dl" ? "neural analyzer" : "classical analyzer";
-  $("meta").textContent = `${data.width}×${data.height} · ${analyzer} · processed in ${(data.elapsed_ms / 1000).toFixed(2)} s`;
+  $("meta").textContent = `${data.width}×${data.height} · ${analyzer} · ${STYLE_LABELS[data.style]} · ` +
+    `processed in ${(data.elapsed_ms / 1000).toFixed(2)} s`;
+}
+
+const fromDataUrl = async (url) => createImageBitmap(await (await fetch(url)).blob());
+
+async function fetchStyle(style) {
+  if (results.has(style)) return results.get(style);
+  const body = new FormData();
+  body.append("file", currentFile);
+  body.append("style", style);
+  const res = await fetch("/api/enhance", { method: "POST", body });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || `Server error ${res.status}`);
+  // Browsers that can't decode a format (e.g. HEIC in Chrome) get the original from the server instead.
+  if (!original && data.original) original = await fromDataUrl(data.original);
+  const entry = { data, enhanced: await fromDataUrl(data.image) };
+  results.set(style, entry);
+  return entry;
+}
+
+function show(entry) {
+  enhanced = entry.enhanced;
+  render();
+  showReport(entry.data);
+}
+
+function markStyle(style) {
+  for (const b of $("styles").querySelectorAll("button")) b.setAttribute("aria-checked", b.dataset.style === style);
+}
+
+async function switchStyle(style) {
+  if (style === currentStyle) return;
+  currentStyle = style;
+  markStyle(style);
+  if (!currentFile || $("result").hidden) return;
+  $("compare").classList.add("loading");
+  try {
+    const entry = await fetchStyle(style);
+    if (style === currentStyle) show(entry); // ignore a slow response if the user already switched again
+  } catch (err) {
+    $("meta").textContent = `Couldn't apply that style: ${err.message}`;
+  } finally {
+    if (style === currentStyle) $("compare").classList.remove("loading");
+  }
 }
 
 async function handleFile(file) {
   if (!file || !(file.type.startsWith("image/") || /\.hei[cf]$/i.test(file.name))) return;
   fileName = file.name.replace(/\.[^.]+$/, "") || "photo";
+  currentFile = file;
+  results = new Map();
   const drop = $("drop");
   drop.classList.add("busy");
   $("drop-text").textContent = "Analyzing and enhancing…";
   $("drop-text").classList.remove("error");
 
   try {
-    const body = new FormData();
-    body.append("file", file);
-    const [res, orig] = await Promise.all([
-      fetch("/api/enhance", { method: "POST", body }),
-      // Browsers that can't decode a format (e.g. HEIC in Chrome) get the original from the server instead.
-      createImageBitmap(file, { imageOrientation: "from-image" }).catch(() => null),
-    ]);
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || `Server error ${res.status}`);
-
-    const fromDataUrl = async (url) => createImageBitmap(await (await fetch(url)).blob());
-    original = orig ?? (data.original ? await fromDataUrl(data.original) : null);
+    original = await createImageBitmap(file, { imageOrientation: "from-image" }).catch(() => null);
+    const entry = await fetchStyle(currentStyle);
     if (!original) throw new Error("This browser can't display that image format.");
-    enhanced = await fromDataUrl(data.image);
 
     for (const id of ["before", "after"]) {
       $(id).width = original.width;
@@ -86,8 +126,7 @@ async function handleFile(file) {
     $("strength").value = 100;
     $("split").value = 50;
     setSplit(50);
-    render();
-    showReport(data);
+    show(entry);
 
     drop.hidden = true;
     $("result").hidden = false;
@@ -109,6 +148,24 @@ drop.addEventListener("drop", (e) => {
   drop.classList.remove("over");
   handleFile(e.dataTransfer.files[0]);
 });
+
+$("styles").addEventListener("click", (e) => {
+  const button = e.target.closest("button");
+  if (button && !button.disabled) switchStyle(button.dataset.style);
+});
+
+// Hide styles the server can't offer (e.g. Pro before the learned model is trained).
+fetch("/api/health")
+  .then((r) => r.json())
+  .then(({ styles }) => {
+    for (const b of $("styles").querySelectorAll("button")) {
+      if (!styles.includes(b.dataset.style)) {
+        b.disabled = true;
+        b.title = "Not available: the learned model isn't trained on this server.";
+      }
+    }
+  })
+  .catch(() => {});
 
 $("strength").addEventListener("input", render);
 $("split").addEventListener("input", (e) => setSplit(e.target.value));

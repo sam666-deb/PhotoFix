@@ -49,6 +49,8 @@ photo ─► [A] Analyzer ─► defect scores ─► [B] plan_edits ─► Edit
 | `photofix/metrics.py` | PSNR, SSIM, ΔE |
 | `scripts/evaluate.py` | Scorecard: restoration quality, "do no harm", per-defect precision/recall |
 | `scripts/train_analyzer.py` | Trains the DL analyzer, saves the best checkpoint by validation loss |
+| `photofix/lut.py` | Phase 2: Image-Adaptive 3D LUT (CNN predicts a per-photo LUT from a thumbnail, applied at full res) |
+| `scripts/prepare_fivek.py`, `train_lut.py`, `eval_fivek.py` | FiveK data prep (streamed, aligned, 480p), LUT training, expert-referenced scorecard |
 | `scripts/gallery.py` | Runs a folder of real photos (JPEG/PNG/HEIC) through the pipeline, writes before/after sheets + report |
 | `server/main.py` | FastAPI: `POST /api/enhance`, serves the UI |
 | `web/` | Upload, before/after slider, strength control, defect report, download |
@@ -56,14 +58,32 @@ photo ─► [A] Analyzer ─► defect scores ─► [B] plan_edits ─► Edit
 Decisions are made on a small preview, and the pixels are rendered at full resolution. Because of this,
 the DL models in later phases can predict `EditParams` from a small image without ever reducing output quality.
 
+## Two editing styles
+
+The app offers a **Natural | Pro** switch:
+
+- **Natural** (default): the neural analyzer + rule-based corrections + finishing pass. Vivid, and suits
+  phone photos that are already processed.
+- **Pro**: global color and tone come from a learned 3D LUT that imitates a professional retoucher
+  (`photofix/lut.py`). It's more refined and understated. The analyzer still drives denoising, shadow
+  recovery and sharpening.
+
+Neither style wins everywhere (see the Phase 2 scorecard), so the user chooses. Pro needs `checkpoints/lut.pt`:
+
+```bash
+.venv/bin/python -m scripts.prepare_fivek   # ~60 GB streamed from Hugging Face, ~2 GB kept; research-use license
+.venv/bin/python -m scripts.train_lut       # ~65 min on an M1 Pro
+.venv/bin/python -m scripts.eval_fivek      # score all variants against the expert
+```
+
 ## Roadmap
 
 | Phase | Goal | Status |
 |---|---|---|
 | 0 | Classical baseline, degradation engine, eval harness, web app | ✅ done |
 | 1 | DL analyzer (dual-view CNN on synthetic defects) replaces `analyze` | ✅ done |
-| 2 | DL global enhancer (predict `EditParams` / 3D LUT, trained on MIT-Adobe FiveK) replaces `plan_edits` | next |
-| 3 | DL local restorers (NAFNet denoise/deblur, tiled inference on MPS) | |
+| 2 | Learned "Pro" style: Image-Adaptive 3D LUT trained on MIT-Adobe FiveK (Expert C) | ✅ done |
+| 3 | DL local restorers (NAFNet denoise/deblur, tiled inference on MPS) | next |
 | 4 | Orchestration + safety checks against over-editing | |
 | 5 | Polish, deploy (e.g. Hugging Face Spaces), portfolio write-up | |
 
@@ -109,7 +129,30 @@ EfficientNet-B0 trunk. The model outputs the *probability* each defect is presen
 Result on those 31 photos: 21 left untouched (already-good iPhone shots), 8 clearly improved, 1 (an aurora
 with a bright horizon glow) still slightly washed out.
 
-**Known weaknesses** (what Phase 2+ targets):
+## Phase 2 scorecard: compared with a professional retoucher
+
+MIT-Adobe FiveK, Expert C, 492 held-out photos at 480p. *No-harm ΔE* is how much the model changes a photo
+that is already finished (the expert's own output); below ~2.3 the change is invisible.
+
+| Variant | PSNR vs expert ↑ | ΔE vs expert ↓ | No-harm ΔE ↓ |
+|---|---|---|---|
+| no edit | 21.01 | 12.87 | 0 |
+| rules (Phase 1) | 20.65 | 13.55 | n/a |
+| learned LUT v1 | 22.70 | 10.22 | 4.75 |
+| **learned LUT v3 (shipped)** | **22.41** | **10.70** | **2.45** |
+
+- **The rules edit *away* from the expert.** They fix defects, but don't edit the way a retoucher would. That's why Phase 2 exists.
+- **v1 learned the expert's style, but also "fixed" photos that were already finished.** On phone JPEGs it
+  cooled and greyed skin tones. FiveK inputs are all unprocessed camera renders, so v1 had never seen a finished photo.
+- **v3 adds 40% "finished photo → itself" training samples,** and only saves checkpoints with no-harm ΔE ≤ 2.5.
+  It gives up 0.3 dB of accuracy to leave finished photos (and skin tones) alone.
+- **The numbers aren't comparable to published FiveK results (~25 dB).** This mirror renders the raw inputs
+  differently from the papers' preprocessed set (no-edit already scores 21 dB here vs ~18 dB there).
+
+On 31 real phone photos: Pro wins the stormy seascape, Natural wins a vivid portrait and an outdoor
+cat photo, and the rest are close. That's why it's a user choice, not a replacement.
+
+**Known weaknesses** (what Phase 3+ targets):
 - **Intent:** silhouettes, night skies and white-backdrop (high-key) photos still get "fixed." The model
   sees a dark or bright photo, and the rule-based corrections can't tell that it's deliberate.
 - **White balance direction** comes from classical gray-edge, which is fooled by strongly colored content

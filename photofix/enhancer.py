@@ -12,6 +12,7 @@ Editing happens in two passes, like a photographer's workflow:
      contrast, whites, vibrance and output sharpening, each only as much as that photo needs.
 """
 
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, replace
 
 import cv2
@@ -61,12 +62,15 @@ class EditParams:
     whites: float = 1.0  # final luma white point; <1 brightens the highlights
     vibrance: float = 0.0  # saturation boost weighted toward muted colors
     sharpen_amount: float = 0.0
+    style: float = 0.0  # 1.0 = the learned expert LUT was applied (Phase 2); informational, set by enhance()
 
     def is_identity(self) -> bool:
         return self == EditParams()
 
     def describe(self) -> list[str]:
         steps = []
+        if self.style:
+            steps.append("Expert color & tone (learned)")
         if self.denoise_h:
             steps.append(f"Denoise (strength {self.denoise_h:.1f})")
         if (self.wb_r, self.wb_g, self.wb_b) != (1.0, 1.0, 1.0):
@@ -290,17 +294,37 @@ def apply_edits(rgb: np.ndarray, p: EditParams) -> np.ndarray:
     return out
 
 
+# Global color/tone edits that the learned LUT takes over from the rules.
+LUT_REPLACES = dict(
+    wb_r=1.0, wb_g=1.0, wb_b=1.0, saturation=1.0, black_point=0.0, white_point=1.0, gamma=1.0, highlight_recover=0.0
+)
+
+
 def enhance(
-    rgb: np.ndarray, strength: float = 1.0, net: ScoreModel | None = None
+    rgb: np.ndarray,
+    strength: float = 1.0,
+    net: ScoreModel | None = None,
+    lut: Callable[[np.ndarray], np.ndarray] | None = None,
+    finish: bool = True,
 ) -> tuple[np.ndarray, Analysis, EditParams]:
+    """Analyze -> correct -> finish. With `lut` (a LUTEnhancer), the learned expert LUT does the global
+    color/tone work; the analyzer still drives denoising, local shadow recovery and sharpening."""
     rgb = np.clip(rgb, 0.0, 1.0).astype(np.float32, copy=False)
     analysis = analyze(rgb, net)
     params = plan_edits(analysis)
-    if not params.is_identity():  # a photo that needs no fixing gets no finishing either
-        preview = resize_max_side(rgb, PREVIEW_SIDE)
+    base, denoised = rgb, 0.0
+    if lut is not None:
+        if params.denoise_h:  # denoise before the LUT, which may brighten (and so amplify) noise
+            base, denoised = apply_edits(rgb, EditParams(denoise_h=params.denoise_h)), params.denoise_h
+        base = lut(base)
+        params = replace(params, **LUT_REPLACES, denoise_h=0.0)
+    if finish and not (params.is_identity() and not denoised):  # nothing to fix = nothing to finish
+        preview = resize_max_side(base, PREVIEW_SIDE)
         corrected = apply_edits(preview, replace(params, denoise_h=0.0, sharpen_amount=0.0))
         params = plan_finish(corrected, params, analysis)
-    out = apply_edits(rgb, params)
+    out = apply_edits(base, params)
+    if lut is not None:
+        params = replace(params, style=1.0, denoise_h=denoised)  # report what was done
     if strength != 1.0:
         out = np.clip(rgb + (out - rgb) * strength, 0.0, 1.0)
     return out, analysis, params

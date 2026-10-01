@@ -70,3 +70,50 @@ class DegradedPhotos(Dataset):
 def worker_init(_):
     cv2.setNumThreads(1)
     torch.set_num_threads(1)
+
+
+class FiveKPairs(Dataset):
+    """MIT-Adobe FiveK (input -> Expert C) pairs at 480p, for the learned LUT.
+
+    Each item: (thumb, input, target). The thumb (THUMB², whole frame) is what the LUT predictor sees;
+    input/target are the pixels the predicted LUT is scored on. Training uses random crops + flips; since
+    a LUT is applied per pixel, a crop changes the content seen, not the color mapping being learned.
+
+    p_finished: fraction of training samples where the input is the expert's *finished* photo and the
+    correct output is that same photo. FiveK inputs are all flat, unprocessed camera renders; without
+    these samples the model has never seen a finished photo and "fixes" phone JPEGs that are already
+    processed (cooling skin tones, adding contrast twice).
+    """
+
+    def __init__(self, folder, train: bool, crop: int = 320, p_finished: float = 0.0):
+        from photofix.lut import THUMB
+
+        self.inputs = list_images(Path(folder) / "input")
+        if not self.inputs:
+            raise FileNotFoundError(f"No images in {folder}/input. Run scripts/prepare_fivek.py first.")
+        self.targets = [Path(folder) / "target" / p.name for p in self.inputs]
+        self.train, self.crop, self.thumb, self.p_finished = train, crop, THUMB, p_finished
+
+    def __len__(self):
+        return len(self.inputs)
+
+    def __getitem__(self, idx):
+        inp, tgt = read_rgb(self.inputs[idx]), read_rgb(self.targets[idx])
+        if self.train:
+            rng = np.random.default_rng()
+            if rng.random() < self.p_finished:
+                inp = tgt
+            h, w = inp.shape[:2]
+            frac = np.sqrt(rng.uniform(0.6, 1.0))
+            ch, cw = int(h * frac), int(w * frac)
+            top, left = int(rng.integers(0, h - ch + 1)), int(rng.integers(0, w - cw + 1))
+            inp, tgt = inp[top : top + ch, left : left + cw], tgt[top : top + ch, left : left + cw]
+            if rng.random() < 0.5:
+                inp, tgt = inp[:, ::-1], tgt[:, ::-1]
+            size = (self.crop, self.crop)
+            thumb = cv2.resize(inp, (self.thumb, self.thumb), interpolation=cv2.INTER_AREA)
+            inp = cv2.resize(np.ascontiguousarray(inp), size, interpolation=cv2.INTER_AREA)
+            tgt = cv2.resize(np.ascontiguousarray(tgt), size, interpolation=cv2.INTER_AREA)
+        else:
+            thumb = cv2.resize(inp, (self.thumb, self.thumb), interpolation=cv2.INTER_AREA)
+        return to_tensor(thumb), to_tensor(np.ascontiguousarray(inp)), to_tensor(np.ascontiguousarray(tgt))

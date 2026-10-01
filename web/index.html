@@ -29,6 +29,12 @@
           <input id="split" class="split" type="range" min="0" max="100" value="50" aria-label="Before/after split">
         </div>
         <div class="controls">
+          <div id="styles" class="segmented" role="radiogroup" aria-label="Editing style">
+            <button type="button" role="radio" data-style="natural" aria-checked="true"
+                    title="Fixes defects and adds punch. Best for phone photos.">Natural</button>
+            <button type="button" role="radio" data-style="pro" aria-checked="false"
+                    title="Color and tone learned from a professional retoucher. Refined, understated.">Pro</button>
+          </div>
           <label>Strength <input id="strength" type="range" min="0" max="100" value="100"> <output id="strength-val">100%</output></label>
           <button id="download" type="button">Download</button>
           <button id="reset" type="button" class="secondary">New photo</button>

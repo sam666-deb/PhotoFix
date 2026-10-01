@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 from fastapi.testclient import TestClient
 from skimage import data
 
@@ -41,3 +42,36 @@ def test_heic_upload_returns_original_for_browser():
     res = client.post("/api/enhance", files={"file": ("photo.heic", buf.getvalue(), "image/heic")})
     assert res.status_code == 200
     assert res.json()["original"].startswith("data:image/jpeg;base64,")
+
+
+def _post(style=None):
+    img = encode_jpeg(exposure(data.astronaut().astype(np.float32) / 255.0, -2.5))
+    form = {"style": style} if style else {}
+    return client.post("/api/enhance", files={"file": ("dark.jpg", img, "image/jpeg")}, data=form)
+
+
+def test_default_style_is_natural():
+    body = _post().json()
+    assert body["style"] == "natural"
+    assert body["params"]["style"] == 0
+
+
+def test_health_lists_styles():
+    from server.main import STYLES
+
+    assert client.get("/api/health").json()["styles"] == list(STYLES)
+    assert "natural" in STYLES
+
+
+def test_pro_style_uses_learned_lut():
+    from server.main import STYLES
+
+    if "pro" not in STYLES:
+        pytest.skip("no trained LUT checkpoint on this machine")
+    body = _post("pro").json()
+    assert body["style"] == "pro"
+    assert body["steps"][0] == "Expert color & tone (learned)"
+
+
+def test_unknown_style_rejected():
+    assert _post("vintage").status_code == 400
