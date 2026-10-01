@@ -1,0 +1,6 @@
+-r requirements.txt
+pyarrow           # FiveK data preparation
+pytest
+httpx             # FastAPI TestClient
+playwright        # browser screenshots / UI checks
+huggingface_hub   # publishing the demo and model weights

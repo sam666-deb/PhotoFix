@@ -1,0 +1,13 @@
+# Only code goes into the image; weights are downloaded from the model repo during the build.
+.venv/
+.git/
+data/
+results/
+checkpoints/
+Original Photos/
+tests/
+scripts/
+deploy/
+**/__pycache__/
+*.pyc
+.DS_Store

@@ -1,0 +1,74 @@
+[
+  {
+    "id": "foggy-night",
+    "label": "Foggy night street",
+    "problem": "Real fog and low light",
+    "file": "examples/foggy-night.jpg",
+    "credit": {
+      "title": "2006 November, fog in Strasbourg 11.jpg",
+      "author": "Syced",
+      "license": "CC0",
+      "source": "https://commons.wikimedia.org/wiki/File:2006_November,_fog_in_Strasbourg_11.jpg"
+    }
+  },
+  {
+    "id": "hazy-morning",
+    "label": "Hazy morning",
+    "problem": "Simulated: heavy haze",
+    "file": "examples/hazy-morning.jpg",
+    "credit": {
+      "title": "Bulskampveld Castle on a foggy spring day, Beernem, 2026.jpg",
+      "author": "DimiTalen",
+      "license": "CC0",
+      "source": "https://commons.wikimedia.org/wiki/File:Bulskampveld_Castle_on_a_foggy_spring_day,_Beernem,_2026.jpg"
+    }
+  },
+  {
+    "id": "lake",
+    "label": "Mountain lake",
+    "problem": "Simulated: 2 stops underexposed",
+    "file": "examples/lake.jpg",
+    "credit": {
+      "title": "Clouds mirrored in a mountain lake (Unsplash).jpg",
+      "author": "Ales Krivec aleskrivec",
+      "license": "CC0",
+      "source": "https://commons.wikimedia.org/wiki/File:Clouds_mirrored_in_a_mountain_lake_(Unsplash).jpg"
+    }
+  },
+  {
+    "id": "diner",
+    "label": "Diner interior",
+    "problem": "Simulated: warm tungsten cast",
+    "file": "examples/diner.jpg",
+    "credit": {
+      "title": "Interior of Kitchen Cafe 2025-01-29.jpg",
+      "author": "Andy Li",
+      "license": "CC0",
+      "source": "https://commons.wikimedia.org/wiki/File:Interior_of_Kitchen_Cafe_2025-01-29.jpg"
+    }
+  },
+  {
+    "id": "city-night",
+    "label": "City at night",
+    "problem": "Simulated: high-ISO noise",
+    "file": "examples/city-night.jpg",
+    "credit": {
+      "title": "Chateau Frontenac illuminated at night in Quebec City.jpg",
+      "author": "Wilfredor",
+      "license": "CC0",
+      "source": "https://commons.wikimedia.org/wiki/File:Chateau_Frontenac_illuminated_at_night_in_Quebec_City.jpg"
+    }
+  },
+  {
+    "id": "backlit-coast",
+    "label": "Coast at sunset",
+    "problem": "Already good: should be left alone",
+    "file": "examples/backlit-coast.jpg",
+    "credit": {
+      "title": "La Fajana beach sunset, La Palma.jpg",
+      "author": "Gerda Arendt",
+      "license": "CC0",
+      "source": "https://commons.wikimedia.org/wiki/File:La_Fajana_beach_sunset,_La_Palma.jpg"
+    }
+  }
+]

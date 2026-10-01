@@ -1,11 +1,11 @@
+# Runtime (what the web app needs). Development tools: requirements-dev.txt
 fastapi
 uvicorn[standard]
 python-multipart
 numpy
 opencv-python-headless
 pillow
+pillow-heif
 scikit-image
 torch
-pytest
-httpx
-pillow-heif
+torchvision

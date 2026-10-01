@@ -1,0 +1,13 @@
+# Files Cloud Build uploads: code only. Weights are downloaded from the HF model repo during the build.
+.venv/
+.git/
+data/
+results/
+checkpoints/
+Original Photos/
+tests/
+scripts/
+deploy/
+**/__pycache__/
+*.pyc
+.DS_Store

@@ -24,6 +24,8 @@
 }
 
 * { box-sizing: border-box; }
+/* Author display rules (e.g. .drop's display:flex) would otherwise override the hidden attribute. */
+[hidden] { display: none !important; }
 
 body {
   margin: 0;
@@ -89,3 +91,18 @@ button.secondary { background: var(--bar); color: var(--text); }
   background: color-mix(in srgb, var(--warn) 14%, transparent); color: var(--text); }
 .steps li.guard::before { content: "🛡 "; }
 .rate-link { color: var(--accent); text-decoration: none; margin-left: 8px; white-space: nowrap; }
+
+.examples { margin: 20px 0 8px; }
+.examples[hidden] { display: none; }
+.example-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.example { display: flex; flex-direction: column; text-align: left; padding: 0; overflow: hidden; border-radius: 10px;
+  background: var(--surface); color: var(--text); border: 1px solid var(--border); cursor: pointer; }
+.example:hover { border-color: var(--accent); }
+.example img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; display: block; }
+.example span { padding: 6px 8px 0; font-size: 13px; font-weight: 600; }
+.example small { padding: 0 8px 8px; font-size: 12px; color: var(--muted); }
+
+.site-footer { max-width: 1200px; margin: 24px auto 40px; padding: 16px; border-top: 1px solid var(--border);
+  color: var(--muted); font-size: 13px; }
+.site-footer a { color: var(--accent); }
+.site-footer .fine { font-size: 12px; }
