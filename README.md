@@ -5,7 +5,13 @@
 ![Python](https://img.shields.io/badge/python-3.14-3776AB?logo=python&logoColor=white)
 ![PyTorch](https://img.shields.io/badge/PyTorch-2.14-EE4C2C?logo=pytorch&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-web%20app-009688?logo=fastapi&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-48%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-51%20passing-brightgreen)
+![Weights](https://img.shields.io/badge/%F0%9F%A4%97%20weights-photofix--models-yellow)
+
+![PhotoFix demo: an underexposed lake photo is detected as too dark and fixed, then compared in Natural and Pro styles; a noisy night photo is denoised; a good photo is left alone.](docs/media/demo.webp)
+
+**Read the [case study](docs/case-study.md)** for the full story: what each stage taught, what went wrong, and
+how it was measured.
 
 Drop in a photo and PhotoFix detects seven kinds of defects: under/over-exposure, low contrast, harsh shadows,
 color casts, noise and blur. It corrects only what's actually wrong, and shows you what it did and why. It
@@ -16,20 +22,24 @@ beat it**. Every claim below comes from a reproducible benchmark in this repo.
 
 ---
 
+
+
 ## Highlights
 
 - **Neural defect analyzer:** a dual-view EfficientNet-B0 that sees the whole frame (exposure, color) and a
-  native-resolution crop (noise, blur). It raised the share of edited photos that got better while cutting visible
-  changes to *already-good* photos by 64% (ΔE 7.35 → 2.67).
+native-resolution crop (noise, blur). It raised the share of edited photos that got better while cutting visible
+changes to *already-good* photos by 64% (ΔE 7.35 → 2.67).
 - **Learned "Pro" style:** an Image-Adaptive 3D LUT trained on MIT-Adobe FiveK. It scores +1.8 dB closer to a
-  professional retoucher than the rule-based pipeline, and is trained not to "fix" photos that are already finished.
+professional retoucher than the rule-based pipeline, and is trained not to "fix" photos that are already finished.
 - **Neural denoise and deblur:** a compact NAFNet (3.9M params), +2.9 dB over classical denoising. It runs in
-  seamless tiles at any resolution, and only on photos flagged as noisy or blurry.
+seamless tiles at any resolution, and only on photos flagged as noisy or blurry.
 - **Output guardrail:** checks the *result* for blown highlights, crushed shadows, unnatural skin tones (in
-  detected faces only), garish color and amplified noise. It automatically tones the edit down and tells you why.
+detected faces only), garish color and amplified noise. It automatically tones the edit down and tells you why.
 - **Human evaluation built in:** a blind A/B rating page with a Bradley–Terry leaderboard, because metrics and
-  human eyes disagreed more than once during this project.
+human eyes disagreed more than once during this project.
 - **Runs locally on a laptop:** all models were trained on an Apple M1 Pro (PyTorch MPS) in about 35–70 minutes each.
+
+
 
 ## How it works
 
@@ -53,44 +63,51 @@ deterministic operation applied to the original pixels: a parametric tone curve,
 restoration network. Output quality therefore never depends on a model's input size, and a 12 MP photo
 finishes in about 0.5–2 s (about 8 s when neural restoration is needed).
 
-| Stage | Classical baseline | Learned replacement | Gain |
-|---|---|---|---|
-| Detect defects | Hand-tuned image statistics | Dual-view EfficientNet-B0 | Change to good photos ΔE 7.35 → 2.67; harsh-shadow detection 0 → 0.72 precision |
-| Global color/tone | Gray-edge white balance, curves | Image-Adaptive 3D LUT (FiveK Expert C) | +1.8 dB PSNR vs a professional retoucher |
-| Denoise/deblur | NL-means + unsharp mask | NAFNet, blind restoration | +2.9 dB (noise), +1.4 dB (noise + blur) |
-| Safety | none | Output guardrail (5 checks) | Change to good photos 2.85 → 2.65, PSNR +0.13 dB |
+
+| Stage             | Classical baseline              | Learned replacement                    | Gain                                                                            |
+| ----------------- | ------------------------------- | -------------------------------------- | ------------------------------------------------------------------------------- |
+| Detect defects    | Hand-tuned image statistics     | Dual-view EfficientNet-B0              | Change to good photos ΔE 7.35 → 2.67; harsh-shadow detection 0 → 0.72 precision |
+| Global color/tone | Gray-edge white balance, curves | Image-Adaptive 3D LUT (FiveK Expert C) | +1.8 dB PSNR vs a professional retoucher                                        |
+| Denoise/deblur    | NL-means + unsharp mask         | NAFNet, blind restoration              | +2.9 dB (noise), +1.4 dB (noise + blur)                                         |
+| Safety            | none                            | Output guardrail (5 checks)            | Change to good photos 2.85 → 2.65, PSNR +0.13 dB                                |
+
+
+
 
 ## Results
 
 All numbers come from held-out data never seen in training and can be reproduced with the scripts in
 [Training and evaluation](#training-and-evaluation).
 
-<details open>
-<summary><b>End to end: repairing synthetic damage</b> (DIV2K validation, 300 samples)</summary>
+**End to end: repairing synthetic damage** (DIV2K validation, 300 samples)
 
-| Pipeline | PSNR ↑ | SSIM ↑ | ΔE ↓ | Photos improved | ΔE on already-good photos ↓ |
-|---|---|---|---|---|---|
-| Damaged input | 17.15 | 0.600 | 19.62 | n/a | n/a |
-| Classical baseline | 18.84 | 0.706 | 16.18 | 70% | 7.35 |
-| + neural analyzer | 19.62 | 0.718 | 14.50 | 75% | 2.67 |
-| + finishing pass | 19.45 | 0.708 | 14.96 | 76% | 2.85 |
-| + neural restorer | 19.68 | 0.736 | 14.69 | 77% | 2.85 |
-| **+ guardrail (shipped)** | **19.81** | **0.730** | **14.78** | **78%** | **2.65** |
+
+| Pipeline                  | PSNR ↑    | SSIM ↑    | ΔE ↓      | Photos improved | ΔE on already-good photos ↓ |
+| ------------------------- | --------- | --------- | --------- | --------------- | --------------------------- |
+| Damaged input             | 17.15     | 0.600     | 19.62     | n/a             | n/a                         |
+| Classical baseline        | 18.84     | 0.706     | 16.18     | 70%             | 7.35                        |
+| + neural analyzer         | 19.62     | 0.718     | 14.50     | 75%             | 2.67                        |
+| + finishing pass          | 19.45     | 0.708     | 14.96     | 76%             | 2.85                        |
+| + neural restorer         | 19.68     | 0.736     | 14.69     | 77%             | 2.85                        |
+| **+ guardrail (shipped)** | **19.81** | **0.730** | **14.78** | **78%**         | **2.65**                    |
+
 
 ΔE below about 2.3 is invisible to the eye. The finishing pass *lowers* PSNR on purpose: this benchmark rewards
 matching the original, while finishing (contrast, clarity, vibrance) goes beyond it to look better, which the
 human ratings and the expert benchmark below capture instead.
-</details>
 
-<details>
-<summary><b>Compared with a professional retoucher</b> (MIT-Adobe FiveK Expert C, 492 photos)</summary>
 
-| Variant | PSNR vs expert ↑ | ΔE vs expert ↓ | Change to finished photos ↓ |
-|---|---|---|---|
-| No edit | 21.01 | 12.87 | 0 |
-| Rule-based (Natural) | 20.65 | 13.55 | n/a |
-| Learned LUT v1 | 22.70 | 10.22 | 4.75 |
-| **Learned LUT v3 (shipped as Pro)** | **22.41** | **10.70** | **2.45** |
+
+**Compared with a professional retoucher** (MIT-Adobe FiveK Expert C, 492 photos)
+
+
+| Variant                             | PSNR vs expert ↑ | ΔE vs expert ↓ | Change to finished photos ↓ |
+| ----------------------------------- | ---------------- | -------------- | --------------------------- |
+| No edit                             | 21.01            | 12.87          | 0                           |
+| Rule-based (Natural)                | 20.65            | 13.55          | n/a                         |
+| Learned LUT v1                      | 22.70            | 10.22          | 4.75                        |
+| **Learned LUT v3 (shipped as Pro)** | **22.41**        | **10.70**      | **2.45**                    |
+
 
 The rules fix defects but move photos *away* from what a professional would do, which is why the learned style
 exists. v1 matched the expert best but also "fixed" phone photos that were already finished, turning skin grey. v3
@@ -99,32 +116,37 @@ unchanged.
 
 The absolute numbers aren't comparable to published FiveK results, because this dataset mirror renders the RAW
 inputs differently.
-</details>
 
-<details>
-<summary><b>Neural restoration vs classical</b> (DIV2K validation crops, 400 samples, PSNR dB)</summary>
 
-| Damage | Unedited | NL-means + unsharp | **NAFNet** |
-|---|---|---|---|
-| Noise | 28.40 | 29.14 | **32.02** |
-| Blur | 26.23 | 26.63 | **27.02** |
-| Noise + blur | 23.49 | 24.08 | **25.50** |
-| JPEG artifacts | 32.57 | 32.25 | **33.21** |
-</details>
 
-<details>
-<summary><b>Defect detection</b> (precision / recall)</summary>
+**Neural restoration vs classical** (DIV2K validation crops, 400 samples, PSNR dB)
 
-| Defect | Classical | Neural |
-|---|---|---|
+
+| Damage         | Unedited | NL-means + unsharp | **NAFNet** |
+| -------------- | -------- | ------------------ | ---------- |
+| Noise          | 28.40    | 29.14              | **32.02**  |
+| Blur           | 26.23    | 26.63              | **27.02**  |
+| Noise + blur   | 23.49    | 24.08              | **25.50**  |
+| JPEG artifacts | 32.57    | 32.25              | **33.21**  |
+
+
+
+
+**Defect detection** (precision / recall)
+
+
+| Defect        | Classical   | Neural      |
+| ------------- | ----------- | ----------- |
 | Underexposure | 0.32 / 0.65 | 0.82 / 1.00 |
-| Overexposure | 0.82 / 0.50 | 0.74 / 0.97 |
-| Low contrast | 0.68 / 0.84 | 0.97 / 1.00 |
+| Overexposure  | 0.82 / 0.50 | 0.74 / 0.97 |
+| Low contrast  | 0.68 / 0.84 | 0.97 / 1.00 |
 | Harsh shadows | 0.00 / 0.00 | 0.72 / 0.88 |
-| Color cast | 0.70 / 0.63 | 0.77 / 0.80 |
-| Noise | 0.89 / 0.88 | 1.00 / 1.00 |
-| Blur | 0.77 / 0.73 | 1.00 / 1.00 |
-</details>
+| Color cast    | 0.70 / 0.63 | 0.77 / 0.80 |
+| Noise         | 0.89 / 0.88 | 1.00 / 1.00 |
+| Blur          | 0.77 / 0.73 | 1.00 / 1.00 |
+
+
+
 
 **Real photos.** Synthetic benchmarks only go so far, so each stage was also reviewed by eye on 31 real phone
 photos (portraits, sunsets, night skies, storms). That review produced the scene-aware rules, the guardrail limits
@@ -139,21 +161,29 @@ Trained on an M1 Pro with 32 GB of RAM.
 git clone https://github.com/sam666-deb/PhotoFix.git
 cd PhotoFix
 python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
+.venv/bin/pip install -r requirements.txt huggingface_hub
+
+# Pretrained weights (55 MB) from https://huggingface.co/Samdany/photofix-models
+.venv/bin/hf download Samdany/photofix-models analyzer.pt lut.pt restorer.pt --local-dir checkpoints
+
 .venv/bin/uvicorn server.main:app --reload
 ```
 
-Open http://127.0.0.1:8000, drop in a photo (JPEG, PNG, WebP or iPhone HEIC), and compare before and after with
-the slider.
+Open [http://127.0.0.1:8000](http://127.0.0.1:8000), drop in a photo (JPEG, PNG, WebP or iPhone HEIC) or pick one of the examples,
+and compare before and after with the slider.
 
-**Model weights** are not stored in git. Without them the app still works fully on the classical pipeline, and each
-trained model is picked up automatically once it's in `checkpoints/`:
+![Result view: before/after slider, detected defects with confidence bars, and the list of applied edits](docs/media/result.png)![Dark mode: a diner photo with a warm color cast corrected](docs/media/result-dark.png)
 
-| Checkpoint | Enables | Train with |
-|---|---|---|
+Each checkpoint is optional. Without one, the app falls back to that stage's classical method, and the
+others are picked up automatically when present in `checkpoints/`. To train them yourself:
+
+
+| Checkpoint    | Enables                 | Train with                              |
+| ------------- | ----------------------- | --------------------------------------- |
 | `analyzer.pt` | Neural defect detection | `scripts.train_analyzer` (about 35 min) |
-| `lut.pt` | Pro style | `scripts.train_lut` (about 65 min) |
-| `restorer.pt` | Neural denoise/deblur | `scripts.train_restorer` (about 70 min) |
+| `lut.pt`      | Pro style               | `scripts.train_lut` (about 65 min)      |
+| `restorer.pt` | Neural denoise/deblur   | `scripts.train_restorer` (about 70 min) |
+
 
 To compare against the baselines, switch any component off with environment variables:
 `PHOTOFIX_ANALYZER=classical`, `PHOTOFIX_LUT=off`, `PHOTOFIX_RESTORER=off`, `PHOTOFIX_GUARDRAIL=off`.
@@ -161,6 +191,8 @@ To compare against the baselines, switch any component off with environment vari
 ## Training and evaluation
 
 ```bash
+.venv/bin/pip install -r requirements-dev.txt        # data prep, tests, screenshots, publishing
+
 # Data
 curl -L -o data/raw/DIV2K_train_HR.zip https://data.vision.ee.ethz.ch/cvl/DIV2K/DIV2K_train_HR.zip   # ~3.5 GB
 curl -L -o data/raw/DIV2K_valid_HR.zip https://data.vision.ee.ethz.ch/cvl/DIV2K/DIV2K_valid_HR.zip   # ~0.4 GB
@@ -178,8 +210,10 @@ curl -L -o data/raw/DIV2K_valid_HR.zip https://data.vision.ee.ethz.ch/cvl/DIV2K/
 .venv/bin/python -m scripts.eval_fivek             # vs a professional retoucher
 .venv/bin/python -m scripts.eval_restore           # neural vs classical restoration
 .venv/bin/python -m scripts.gallery --images DIR   # before/after sheets for your own photos
-.venv/bin/python -m pytest                         # 48 tests
+.venv/bin/python -m pytest                         # 51 tests
 ```
+
+
 
 ### Human ratings
 
@@ -205,56 +239,146 @@ photofix/
   ratings.py       Bradley–Terry ranking of human ratings         metrics.py   PSNR / SSIM / ΔE
 server/            FastAPI app: /api/enhance, rating + feedback endpoints
 web/               editor (before/after, strength, Natural/Pro) and rating page; no build step
-scripts/           data prep, training, benchmarks, gallery, rating tools
+scripts/           data prep, training, benchmarks, gallery, rating tools, demo recording, deployment
 models/            bundled YuNet face detector (used by the guardrail's skin check)
-tests/             48 tests: pipeline, models, guardrail, API, ratings
+deploy/            model card and hosting config (Hugging Face Space / Cloud Run)
+docs/              case study and demo media
+tests/             51 tests: pipeline, models, guardrail, API, ratings, public mode
 ```
+
+
 
 ## Design decisions and lessons learned
 
 - **The model decides *whether*; image statistics decide *how much*.** The analyzer outputs defect
-  probabilities, not edit amounts. That kept the edits interpretable and let each stage be swapped out on its own.
+probabilities, not edit amounts. That kept the edits interpretable and let each stage be swapped out on its own.
 - **"Do no harm" is a first-class metric.** Every model was trained with untouched samples (25% clean photos for
-  the analyzer, 15% clean crops for the restorer, 40% finished photos for the LUT) and is evaluated on how much it
-  changes photos that need nothing.
+the analyzer, 15% clean crops for the restorer, 40% finished photos for the LUT) and is evaluated on how much it
+changes photos that need nothing.
 - **Domain gap is real.** The FiveK-trained style "fixed" already-processed phone JPEGs and turned skin grey,
-  because it had never seen a finished photo. This was found by looking at real photos, not from the metrics.
+because it had never seen a finished photo. This was found by looking at real photos, not from the metrics.
 - **Metrics and eyes disagree.** The finishing pass lowered PSNR but looked clearly better; the best-scoring LUT
-  made faces pale. That's why human ratings are the final scorecard.
+made faces pale. That's why human ratings are the final scorecard.
 - **Check outputs, not just inputs.** Every stage decides from the input; the guardrail is the one place that
-  checks the result. Its first skin check used color alone and flagged sunset clouds, so it now only looks inside
-  detected faces.
+checks the result. Its first skin check used color alone and flagged sunset clouds, so it now only looks inside
+detected faces.
+
+
 
 ## Limitations
 
 - Deliberately dark or bright photos (silhouettes, night skies, white backdrops) can still be over-corrected.
-  Telling intent from a mistake needs scene understanding the current models don't have.
+Telling intent from a mistake needs scene understanding the current models don't have.
 - Deblurring gains are modest (+0.4 dB). Real defocus is hard for a 3.9M-parameter model with a short training run.
 - Restoration was validated on synthetic damage; the real test set contained no genuinely noisy photos, because
-  modern phones denoise heavily.
+modern phones denoise heavily.
 - Edits are global or tone-based. Region-aware editing (sky, faces, subject) is the most promising next step.
+
+
 
 ## Roadmap
 
-- [x] Classical baseline, synthetic damage engine, evaluation harness, web app
-- [x] Neural defect analyzer
-- [x] Learned Pro style (3D LUT, MIT-Adobe FiveK)
-- [x] Neural denoise and deblur (NAFNet)
-- [x] Orchestrated pipeline and output guardrail
-- [x] Blind A/B rating page and feedback loop
-- [ ] Public demo and release of pretrained weights
-- [ ] Region-aware editing (sky, skin, subject segmentation)
+
+
+### Done
+
+- [x] **Phase 0:** classical baseline, synthetic damage engine, evaluation harness, web app
+- [x] **Phase 1:** neural defect analyzer (change to good photos: 7.35 → 2.67 ΔE)
+- [x] **Phase 2:** learned Pro style, a 3D LUT trained on MIT-Adobe FiveK (+1.8 dB closer to a retoucher than the rules)
+- [x] **Phase 3:** neural denoise and deblur with NAFNet (+2.9 dB over NL-means on noise)
+- [x] **Phase 4:** orchestrated pipeline and output guardrail (change to good photos: 2.65 ΔE)
+- [x] **Phase 5:** pretrained weights on [Hugging Face](https://huggingface.co/Samdany/photofix-models), public mode,
+  CC0 example photos, demo recording, [case study](docs/case-study.md)
+- [x] Blind A/B rating page and editor feedback log
+
+
+
+### Later
+
+- [ ] **Scene intent:** stop "fixing" deliberate silhouettes, night skies and white-backdrop photos.
+- [ ] **Real-world restoration:** train on real sensor noise (e.g. SIDD), train longer, and test on genuinely noisy photos.
+- [ ] **Pro style for phone photos:** retrain on a warmer FiveK expert, portrait retouches (PPR10K) or personal edits.
+- [ ] **Upscaling** for small inputs, and **RAW / ProRAW** input for more highlight and shadow headroom.
+
+
+
+## Deployment
+
+**Status:** PhotoFix isn't hosted publicly yet. It runs locally (see [Getting started](#getting-started)), and the
+trained weights are public, so a working copy is one clone and one download away. Everything needed to host it is
+in the repo. The container hasn't been built end to end yet, so the first deployment may need small fixes, such as
+the Python base image version.
+
+### Public mode
+
+Hosted copies run with `PHOTOFIX_PUBLIC=1`, which the `Dockerfile` sets. In public mode, uploads are processed in
+memory and never stored, the local-only rating and feedback features are switched off, photos are capped in size,
+and concurrent work is limited so a small CPU server stays responsive.
+
+
+| Variable                                               | Default (public) | Effect                                                                   |
+| ------------------------------------------------------ | ---------------- | ------------------------------------------------------------------------ |
+| `PHOTOFIX_PUBLIC`                                      | `1`              | Public mode (above)                                                      |
+| `PHOTOFIX_MAX_SIDE`                                    | `2048`           | Longest side processed; larger uploads are resized first                 |
+| `PHOTOFIX_CONCURRENCY`                                 | `2`              | Photos processed at once; others wait up to 60 s, then get "server busy" |
+| `PHOTOFIX_ANALYZER` / `LUT` / `RESTORER` / `GUARDRAIL` | on               | Set to `classical` / `off` to fall back to a baseline                    |
+
+
+On 2 vCPUs a typical photo takes 1–2 s, and one that needs neural restoration about 4–6 s.
+
+### The container
+
+The `Dockerfile` installs CPU-only PyTorch (about 200 MB instead of about 2 GB with CUDA), downloads the three
+checkpoints from [Samdany/photofix-models](https://huggingface.co/Samdany/photofix-models) at build time, runs as a
+non-root user, and listens on `$PORT` (default 7860). `.dockerignore` and `.gcloudignore` keep data, checkpoints,
+results and personal photos out of the build.
+
+```bash
+docker build -t photofix .
+docker run -p 7860:7860 photofix          # http://localhost:7860
+```
+
+
+
+### Option A: Google Cloud Run
+
+Builds the image in Google Cloud, so Docker isn't needed locally. The project must have a billing account linked.
+Typical portfolio traffic stays within Cloud Run's free tier, and image storage costs a few cents a month.
+
+```bash
+gcloud auth login
+gcloud config set project <PROJECT_ID>
+./scripts/deploy_cloudrun.sh               # prints the live URL and checks /api/health
+```
+
+The script deploys to `us-central1` with 2 vCPU, 2 GiB of RAM, scale-to-zero, and at most 2 instances, so cost stays
+bounded. The first request after idle takes about 10–20 s while an instance starts.
+
+### Option B: Hugging Face Docker Space
+
+As of 2026, Docker Spaces require a Hugging Face PRO subscription, even on the basic CPU hardware.
+
+```bash
+.venv/bin/hf auth login                    # token with write access
+.venv/bin/python -m scripts.deploy_hf --user <hf-username> --dry-run   # lists exactly what would upload
+.venv/bin/python -m scripts.deploy_hf --user <hf-username>
+```
+
+The script uploads only an explicit allow-list of files (app code, web UI, face-detector model, examples), so
+personal photos and datasets can't be published by accident. `--weights-only` publishes just the model repo.
 
 ## Acknowledgements and licenses
 
 - **DIV2K:** Agustsson & Timofte, NTIRE 2017. Academic research use.
 - **MIT-Adobe FiveK:** Bychkovsky et al., CVPR 2011, used through a
-  [Hugging Face mirror](https://huggingface.co/datasets/KlyaT/mit-adobe-fivek). Research use only, under the
-  [dataset license](https://data.csail.mit.edu/graphics/fivek/).
+[Hugging Face mirror](https://huggingface.co/datasets/KlyaT/mit-adobe-fivek). Research use only, under the
+[dataset license](https://data.csail.mit.edu/graphics/fivek/).
 - **Image-Adaptive 3D LUT:** Zeng et al., TPAMI 2020 (architecture re-implemented).
 - **NAFNet:** Chen et al., ECCV 2022 (architecture re-implemented; original under MIT).
 - **EfficientNet-B0:** ImageNet weights from torchvision.
 - **YuNet face detector:** Shiqi Yu et al., OpenCV model zoo, MIT. See [models/README.md](models/README.md).
+- **Example photos** (`web/examples/`): CC0, from Wikimedia Commons. Authors are credited in the app and in
+`web/examples/examples.json`. Four have clearly labeled simulated defects.
 
 Models trained on these datasets inherit their research-use terms.
 

@@ -15,7 +15,7 @@ tags:
 # PhotoFix models
 
 Trained weights for [PhotoFix](https://github.com/sam666-deb/PhotoFix), an automatic photo enhancement pipeline.
-Try them in the [live demo]({DEMO_URL}).
+See the [project README](https://github.com/sam666-deb/PhotoFix) for a demo video, benchmarks and the write-up.
 
 | File | Model | Params | Trained on | Held-out result |
 |---|---|---|---|---|
